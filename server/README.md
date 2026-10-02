@@ -6,6 +6,10 @@ The service builds and its integration suite runs without provider credentials. 
 
 ## Verify without keys
 
+Accommodation comparison also runs independently with `--comparison-only`. It exposes public search and property-offer routes plus health checks, without loading PostgreSQL, identity, or Stripe configuration. The full commerce server mounts the same comparison routes. Provider credentials remain server-side; see the [API selection, configuration and acceptance guide](../docs/accommodation-apis.md).
+
+Set `ROAM_ENV=development` for local runs. Production requires `ROAM_INGRESS_RATE_LIMITED=true` after configuring ingress limits, and `ROAM_COMPARISON_PUBLIC_ACCESS=true` before using any configured SerpAPI key on public routes. The default provider budget is 200 upstream requests per UTC day per process, configurable with `ROAM_COMPARISON_DAILY_REQUEST_LIMIT`. This is a local guard, not a distributed spending cap: restarts and replicas have separate counters. Configure provider account limits and shared ingress controls before public deployment. An unconfigured provider yields explicit `NOT_CONFIGURED` responses with no offers.
+
 From the repository root, with JDK 17 and Docker running:
 
 ```sh
@@ -49,7 +53,7 @@ docker compose -f server/compose.yml build
 docker compose -f server/compose.yml up -d
 ```
 
-The image runs as a non-root user with a read-only filesystem, removed capabilities, a memory limit, and a temporary `/tmp`. The provided Compose service binds HTTP only to localhost. Put it behind a TLS reverse proxy or use a managed container host with TLS termination. Do not expose port 8080 directly to the internet. Restrict ingress to the proxy and enforce HTTPS on the public endpoint. `/health/live` checks the process; `/health/ready` checks database access.
+The image runs as a non-root user with a read-only filesystem, removed capabilities, a memory limit, and a temporary `/tmp`. The provided Compose service binds HTTP only to localhost. Put it behind a TLS reverse proxy or use a managed container host with TLS termination. Do not expose port 8080 directly to the internet. Restrict ingress to the proxy and enforce HTTPS on the public endpoint. `/health/live` checks the process; `/health/ready` checks database access in commerce mode. Comparison-only readiness checks API availability and does not verify provider credentials or acceptance.
 
 Configure request/body/header limits and per-client rate limits at that ingress, with a separate webhook budget and Stripe's retry behavior in mind. The service intentionally ignores forwarding headers and uses authenticated-user limits; trusting arbitrary `X-Forwarded-For` would permit bypasses. `ROAM_INGRESS_RATE_LIMITED=true` disables the local per-IP fallback so a reverse proxy's address does not group all customers under a single budget. It does not configure your proxy for you.
 

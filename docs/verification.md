@@ -1,5 +1,13 @@
 # Verification evidence
 
+## Accommodation comparison — v2.1.0
+
+The comparison milestone adds 54 JVM cases to the connected foundation, bringing the passing total to **173**: core 28, network 38, PostgreSQL service 48, Room/SQLite 18, and Android state 41. No cases are skipped. Coverage includes exact decimal/JPY prices, incomplete fees and totals, strict trip/currency echo matching, exact-name property responses, unsafe links, stale handoffs, out-of-order responses, cancellation, partial provider failures, request budgets and standalone routing.
+
+The installed comparison service starts in a hardened Linux container as UID 100, without database, identity, payment or provider credentials. Its runtime smoke check verifies readiness, uncached `NOT_CONFIGURED` coverage with zero prices, and absence of account routes. Provider adapters use controlled fixtures; **no live SerpAPI account response has been verified**. Complete the [provider acceptance steps](accommodation-apis.md#verify-after-signing-up) after supplying your own server-side key.
+
+Previous performance numbers below belong to v2.0.0. They are not new measurements of the comparison feature. Physical-device profiling, actual provider acceptance and operational deployment remain launch requirements.
+
 ## Connected foundation — v2.0.0
 
 Verified on October 2, 2026. [PR #4](https://github.com/jon-jc/kotlin/pull/4) passed Android compilation/lint, JVM tests, native device tests, PostgreSQL integration and container smoke checks before merging. Provider configuration and commercial launch remain separate from these controlled tests.

@@ -42,6 +42,12 @@ jobs:
           trap 'docker stop roam-smoke; docker rm roam-smoke' EXIT
           python tools/check_runtime.py http://127.0.0.1:8080
           test "$(docker exec roam-smoke id -u)" != '0'
+      - name: Exercise independent comparison runtime without provider secrets
+        run: |
+          docker run -d --name roam-comparison-smoke --network host --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --memory 512m -e ROAM_ENV=development -e PORT=8081 roam-service:ci --comparison-only
+          trap 'docker stop roam-comparison-smoke; docker rm roam-comparison-smoke' EXIT
+          python tools/check_comparison_runtime.py http://127.0.0.1:8081
+          test "$(docker exec roam-comparison-smoke id -u)" != '0'
       - uses: actions/upload-artifact@v4
         if: always()
         with:

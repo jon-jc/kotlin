@@ -38,6 +38,10 @@ jobs:
           SUPABASE_PUBLISHABLE_KEY: sb_publishable_release_fixture
           STRIPE_PUBLISHABLE_KEY: pk_live_release_fixture
         run: ./gradlew :app:assembleRelease :app:lintRelease --stacktrace --max-workers=2
+      - name: Verify independent comparison release
+        env:
+          ROAM_COMPARISON_API_URL: https://search.release-fixture.invalid
+        run: ./gradlew :app:assembleComparison :app:lintComparison --stacktrace --max-workers=2
       - uses: actions/upload-artifact@v4
         if: always()
         with:

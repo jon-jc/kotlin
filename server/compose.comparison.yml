@@ -1,0 +1,24 @@
+services:
+  comparison:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    # Compose explicitly loads this file; the JVM launcher does not load .env files itself.
+    env_file: .env
+    command: ["--comparison-only"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    mem_limit: 512m
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health/ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

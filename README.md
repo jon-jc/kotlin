@@ -17,6 +17,7 @@ A native Android travel passport that brings identity, community value, and comm
 
 ## The experience
 
+* Compare hotel and vacation-rental search observations for your dates, guests and currency; inspect booking-site offers and continue on the provider's website.
 * Discover stays in Japan, Italy, and Portugal; combine search, categories, and a persistent wish list.
 * Plan dates and occupancy, inspect exact pricing, and apply travel credits before a simulated card payment.
 * Recover a lost response without creating another booking or spending credit twice.
@@ -26,6 +27,8 @@ A native Android travel passport that brings identity, community value, and comm
 * Use the same app in dark mode, at larger font sizes, or on a tablet with a navigation rail and adaptive grid.
 
 The **demo** runs offline with fictional stays, an account, and simulated payments. The **connected** build uses Supabase email sign-in, a Kotlin service with PostgreSQL, and Stripe PaymentSheet. It requires your service configuration; missing configuration never falls back to simulated success. No services are deployed or merchant accounts configured by this repository.
+
+The new **comparison** experience opens before sign-in and can run independently of account and payment services. Its SerpAPI adapter retrieves Google Hotels and vacation-rental observations; no key means no prices. Airbnb opens separately without a price claim. Start with the [API shortlist and setup guide](docs/accommodation-apis.md). Real provider acceptance remains pending your account and credentials.
 
 ## Run it
 
@@ -49,6 +52,8 @@ adb install -r app/build/outputs/apk/staging/app-staging.apk
 
 Staging installs separately from the demo. Production release builds require HTTPS endpoints and a Stripe live publishable key; they remain unsigned until your release pipeline supplies signing. New connected accounts have zero credit. Fictional inventory cannot be sold using live Stripe keys.
 
+For search alone, run the service with `--comparison-only` and build `:app:assembleComparison` with a public HTTPS `ROAM_COMPARISON_API_URL`. This unsigned variant requires no Supabase or Stripe configuration. See [comparison setup](docs/accommodation-apis.md#configure-android).
+
 ## Engineering decisions you can inspect
 
 | Boundary | Implementation | Why it exists |
@@ -60,7 +65,7 @@ Staging installs separately from the demo. Production release builds require HTT
 | `server` | Ktor, PostgreSQL, verified JWTs, durable Stripe state machine | Authoritative prices, inventory and account authorization |
 | `benchmark` | Macrobenchmark startup and frame timing on a minified build | Repeatable measurements with trace evidence |
 
-Money uses checked 64-bit integer cents. Receipt JSON encodes those cents as decimal strings so web clients can preserve values beyond JavaScript's safe integer range. A request key identifies an immutable checkout payload; a conflicting retry fails instead of charging a different request. Cancellation and redemption use the same atomic boundary.
+Commerce money uses checked 64-bit integer USD cents. Receipt JSON encodes those cents as decimal strings so web clients can preserve values beyond JavaScript's safe integer range. A request key identifies an immutable checkout payload; a conflicting retry fails instead of charging a different request. Cancellation and redemption use the same atomic boundary. External comparison prices use exact decimal strings with an explicit currency and fee-coverage state; they never enter the wallet or checkout ledger.
 
 See [architecture and tradeoffs](docs/architecture.md), [receipt and service contracts](docs/contracts.md), and the [golden receipt fixture](core/src/test/resources/receipt-v1.json).
 

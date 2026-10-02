@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.*
 import androidx.compose.foundation.shape.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.ArrowForward
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -21,7 +22,7 @@ import androidx.compose.ui.unit.sp
 import com.roam.core.*
 
 @Composable
-fun ExploreScreen(state: RoamState, accept: (Intent) -> Unit) {
+fun ExploreScreen(state: RoamState, accept: (Intent) -> Unit, onCompare: (() -> Unit)? = null) {
     LazyVerticalGrid(
         modifier = Modifier.testTag("discovery_feed").semantics { testTagsAsResourceId = true },
         columns = GridCells.Adaptive(320.dp),
@@ -78,6 +79,31 @@ fun ExploreScreen(state: RoamState, accept: (Intent) -> Unit) {
                 "Thoughtful stays. A world of belonging.",
             )
         }
+        if (onCompare != null)
+            item(span = { GridItemSpan(maxLineSpan) }) {
+                Surface(
+                    onClick = onCompare,
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.secondaryContainer,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        Modifier.padding(20.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        Icon(Icons.Outlined.TravelExplore, null, Modifier.size(30.dp))
+                        Column(Modifier.weight(1f)) {
+                            Text("Compare stays", style = MaterialTheme.typography.titleLarge)
+                            Text(
+                                "Hotels, vacation rentals, and a clearer view of the price.",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                        Icon(Icons.AutoMirrored.Outlined.ArrowForward, null)
+                    }
+                }
+            }
         item(span = { GridItemSpan(maxLineSpan) }) {
             OutlinedTextField(
                 state.screen.query,

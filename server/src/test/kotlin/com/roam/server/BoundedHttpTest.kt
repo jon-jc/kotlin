@@ -12,6 +12,35 @@ import org.junit.Test
 
 class BoundedHttpTest {
     @Test
+    fun `provider redirects are returned without following them or forwarding query credentials`() {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        val target = java.util.concurrent.atomic.AtomicInteger()
+        server.createContext("/redirect") { exchange ->
+            exchange.responseHeaders.add("Location", "/target")
+            exchange.sendResponseHeaders(302, -1)
+            exchange.close()
+        }
+        server.createContext("/target") { exchange ->
+            target.incrementAndGet()
+            exchange.sendResponseHeaders(200, -1)
+            exchange.close()
+        }
+        server.start()
+        try {
+            val request =
+                HttpRequest.newBuilder(
+                        URI("http://127.0.0.1:${server.address.port}/redirect?api_key=synthetic")
+                    )
+                    .GET()
+                    .build()
+            assertEquals(302, BoundedHttp().send(request, 1024).statusCode())
+            assertEquals(0, target.get())
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
     fun `body stalled after headers still respects whole response deadline`() {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         val executor = Executors.newSingleThreadExecutor()
