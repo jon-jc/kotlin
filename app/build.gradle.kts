@@ -1,4 +1,9 @@
-plugins { id("com.android.application"); kotlin("android"); kotlin("plugin.compose") }
+plugins {
+    id("com.android.application")
+    kotlin("android")
+    kotlin("plugin.compose")
+}
+
 android {
     namespace = "com.roam.app"
     compileSdk = 36
@@ -15,15 +20,35 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
+        create("benchmark") {
+            initWith(getByName("release"))
+            isDebuggable = false
+            signingConfig = signingConfigs.getByName("debug")
+            matchingFallbacks += listOf("release")
         }
     }
-    compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
-    buildFeatures { compose = true; buildConfig = true }
-    testOptions { unitTests.isIncludeAndroidResources = true; animationsDisabled = true }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
+    testOptions {
+        unitTests.isIncludeAndroidResources = true
+        animationsDisabled = true
+    }
     packaging { resources.excludes += "/META-INF/{AL2.0,LGPL2.1}" }
 }
+
 kotlin { jvmToolchain(17) }
+
 dependencies {
     implementation(project(":core"))
     implementation(project(":data"))
@@ -34,6 +59,8 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.4")
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
+    implementation("io.coil-kt.coil3:coil-compose:3.3.0")
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
     testImplementation("junit:junit:4.13.2")

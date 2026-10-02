@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Roam demo receipt v1",
+  "description": "Portable demo receipt. Arithmetic and cancellation invariants are defined in docs/contracts.md and enforced by ReceiptCodec.",
+  "type": "object",
+  "required": ["version", "simulated", "confirmation", "stayId", "status", "checkIn", "checkOut", "guests", "total", "creditApplied", "creditReturned", "simulatedCardAmount"],
+  "properties": {
+    "version": { "const": 1 },
+    "simulated": { "const": true },
+    "confirmation": { "type": "string", "minLength": 1, "maxLength": 100 },
+    "stayId": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["confirmed", "cancelled"] },
+    "checkIn": { "type": "string", "format": "date" },
+    "checkOut": { "type": "string", "format": "date" },
+    "guests": { "type": "integer", "minimum": 1, "maximum": 20 },
+    "total": { "$ref": "#/$defs/money" },
+    "creditApplied": { "$ref": "#/$defs/money" },
+    "creditReturned": { "$ref": "#/$defs/money" },
+    "simulatedCardAmount": { "$ref": "#/$defs/money" }
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "money": {
+      "type": "object",
+      "required": ["minor"],
+      "properties": {
+        "minor": { "type": "string", "pattern": "^(0|[1-9][0-9]*)$", "description": "Integer cents, at most signed 64-bit maximum; parse with exact arithmetic." },
+        "currency": { "const": "USD", "default": "USD" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

@@ -18,6 +18,7 @@ flowchart LR
 * `core`: pure Kotlin models, exact-money arithmetic, validation, business operations, and persistence ports. No Android dependency.
 * `data`: Room entities, indexed queries, transaction implementation, and schema history. The store serializes mutations. Failed blocks roll back all changes.
 * `app`: composition root, lifecycle-aware state, Compose features, accessibility, and navigation. Constructor injection keeps dependency ownership explicit; an application-scoped container owns the database and service.
+* `benchmark`: a separate Macrobenchmark APK drives a profileable, minified app build. Startup and scrolling produce machine-readable measurements and Perfetto traces.
 
 ## Commerce invariants
 
@@ -41,8 +42,14 @@ Pure Kotlin tests cover date and occupancy boundaries, currency arithmetic, fee 
 
 The ViewModel exposes one immutable state stream, accepts typed intents, and collects the transactional database stream. A `SavedStateHandle` retains checkout details and the exact request key across Android process recreation. Transient operations serialize at the UI boundary and again in the database; cancellation is propagated. After an interrupted response, checkout displays the persisted original quote and retries the same request key.
 
-Seven ViewModel tests cover duplicate taps, decline isolation, lost-response recovery, restored checkout, frozen in-flight input, profile validation, and composed discovery filters. Four native Compose tests exercise complete user journeys against isolated Room databases on API 35. They assert eventual observable state after asynchronous persistence, not timing assumptions.
+Seven ViewModel tests cover duplicate taps, decline isolation, lost-response recovery, restored checkout, frozen in-flight input, profile validation, and composed discovery filters. Five native Compose tests exercise complete user journeys against isolated Room databases on API 35, including the real FileProvider receipt export. They assert eventual observable state after asynchronous persistence, not timing assumptions. Seven receipt tests enforce schema evolution, privacy boundaries, and exact cross-platform amounts.
+
+## Rendering and startup
+
+Discovery uses stable item keys and an adaptive lazy grid. Destination photos are bundled for offline reliability, decoded asynchronously at the component's requested size, and reused through Coil's process-wide image loader and memory cache. No network image module is included. `DestinationImage` participates in `ReportDrawnWhen`, so startup measurement waits for visible images to settle as well as the account snapshot. Failed image loads settle the reporter and display a theme-colored fallback.
+
+This design followed a trace finding: synchronous drawable decoding in lazy composition occupied about 22 ms of the UI thread during a measured scroll. The [verification report](verification.md) records the before/after measurements and their emulator limitations. A real catalog would also need appropriately sized CDN images, placeholders, paging, cancellation, and a device-specific cache budget.
 
 The layout uses a navigation rail on wide windows and an adaptive discovery grid. Dark colors follow the system. Interactive icons have meaningful accessibility labels; headings, selectable controls, and form fields expose native semantics. Primary controls are at least 48dp. The sample copy is English-only; a production localization pass would extract it to resources and include pseudolocale/RTL testing.
 
-References: [Android architecture recommendations](https://developer.android.com/topic/architecture/recommendations), [Room transactions](https://developer.android.com/reference/androidx/room/Transaction), [Compose state](https://developer.android.com/develop/ui/compose/state).
+References: [Android architecture recommendations](https://developer.android.com/topic/architecture/recommendations), [Room transactions](https://developer.android.com/reference/androidx/room/Transaction), [Compose state](https://developer.android.com/develop/ui/compose/state), [Coil Compose image sizing](https://coil-kt.github.io/coil/compose/).
