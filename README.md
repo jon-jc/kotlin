@@ -8,9 +8,9 @@
 A native Android travel passport that brings identity, community value, and commerce into one considered experience. Built to demonstrate the engineering behind a dependable consumer product: exact money, atomic credits, recoverable checkout, durable state, and accessible declarative UI.
 
 <p align="center">
-  <img src="docs/images/explore.png" width="31%" alt="Roam discovery on an Android phone" />
+  <img src="docs/images/explore-v2-1.png" width="31%" alt="Roam discovery with accommodation comparison" />
   <img src="docs/images/wallet.png" width="31%" alt="Travel credit wallet and community benefit" />
-  <img src="docs/images/passport.png" width="31%" alt="Private travel passport and community profile" />
+  <img src="docs/images/comparison.png" width="31%" alt="Hotel and vacation-rental comparison search" />
 </p>
 
 **[Download the demo APK](https://github.com/jon-jc/kotlin/releases/latest)** · **[Architecture](docs/architecture.md)** · **[Verification](docs/verification.md)** · **[Interview walkthrough](docs/walkthrough.md)**
