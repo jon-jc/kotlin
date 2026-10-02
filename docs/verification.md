@@ -17,7 +17,7 @@ Verified on October 2, 2026. [PR #4](https://github.com/jon-jc/kotlin/pull/4) pa
 
 The JSON Schema check accepts golden/additive receipts and rejects five incompatible forms. Debug, staging and optimized benchmark APKs compile. Debug/staging/release lint has zero errors; dependency-update warnings remain visible rather than suppressed. Connected release shrinking also compiles with synthetic public configuration targeting `.invalid` domains; that unsigned verification artifact is not distributed as a working production app.
 
-Five release configuration checks reject missing settings, a misplaced Stripe private key, a misplaced Supabase private key, a test key in a production release, and a cleartext production endpoint. These checks run before distributing any build; public configuration is distinct from server secrets.
+Five release configuration checks reject missing settings, a misplaced Stripe private key, a misplaced Supabase private key, a test key in a production release, and a cleartext production endpoint. These checks run in CI; public configuration is distinct from server secrets.
 
 ## Actual runtime checks
 
