@@ -1,0 +1,51 @@
+name: Commerce service
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+concurrency:
+  group: service-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  postgres-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: roam_test
+          POSTGRES_USER: roam_test
+          POSTGRES_PASSWORD: local-integration-only
+        ports: ['55432:5432']
+        options: >-
+          --health-cmd "pg_isready -U roam_test -d roam_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+      - run: chmod +x gradlew
+      - run: ./gradlew :server:test :server:installDist --stacktrace --max-workers=2
+      - name: Verify runtime container
+        run: docker build -f server/Dockerfile -t roam-service:ci .
+      - name: Exercise the installed service in its hardened container
+        run: |
+          docker exec ${{ job.services.postgres.id }} psql -U roam_test -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE roam_smoke'
+          docker run --rm --network host -e ROAM_ENV=development -e DATABASE_URL=jdbc:postgresql://127.0.0.1:55432/roam_smoke -e DATABASE_USER=roam_test -e DATABASE_PASSWORD=local-integration-only roam-service:ci --seed-demo
+          docker run -d --name roam-smoke --network host --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges:true --memory 512m -e ROAM_ENV=development -e DATABASE_URL=jdbc:postgresql://127.0.0.1:55432/roam_smoke -e DATABASE_USER=roam_test -e DATABASE_PASSWORD=local-integration-only -e SUPABASE_URL=https://smoke.invalid -e STRIPE_SECRET_KEY=sk_test_local_smoke_fixture -e STRIPE_WEBHOOK_SECRET=whsec_local_smoke_fixture roam-service:ci
+          trap 'docker stop roam-smoke; docker rm roam-smoke' EXIT
+          python tools/check_runtime.py http://127.0.0.1:8080
+          test "$(docker exec roam-smoke id -u)" != '0'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: commerce-service-reports
+          path: |
+            server/build/reports/
+            server/build/test-results/

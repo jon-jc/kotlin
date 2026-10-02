@@ -2,6 +2,8 @@ package com.roam.data
 
 import android.content.Context
 import androidx.room.*
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.roam.core.*
 import java.time.LocalDate
 import kotlinx.coroutines.flow.Flow
@@ -42,6 +44,16 @@ data class BookingRecord(
     val due: Long,
     val createdAt: Long,
     val cancelled: Boolean,
+    @ColumnInfo(defaultValue = "'Unavailable stay'") val stayName: String = "Unavailable stay",
+    @ColumnInfo(defaultValue = "'Location unavailable'")
+    val stayLocation: String = "Location unavailable",
+    @ColumnInfo(defaultValue = "''") val stayCountry: String = "",
+    @ColumnInfo(defaultValue = "''") val stayImage: String = "",
+    @ColumnInfo(defaultValue = "1") val simulated: Boolean = true,
+    @ColumnInfo(defaultValue = "0") val cancellationPending: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val requiresSupport: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val paymentPending: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val paymentFailed: Boolean = false,
 )
 
 @Entity(
@@ -82,16 +94,55 @@ interface RoamDao {
 
 @Database(
     entities = [AccountRecord::class, BookingRecord::class, LedgerRecord::class],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class RoamDatabase : RoomDatabase() {
     abstract fun dao(): RoamDao
 
     companion object {
+        val MIGRATION_1_2 =
+            object : Migration(1, 2) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "ALTER TABLE bookings ADD COLUMN stayName TEXT NOT NULL DEFAULT 'Unavailable stay'"
+                    )
+                    db.execSQL(
+                        "ALTER TABLE bookings ADD COLUMN stayLocation TEXT NOT NULL DEFAULT 'Location unavailable'"
+                    )
+                    db.execSQL(
+                        "ALTER TABLE bookings ADD COLUMN stayCountry TEXT NOT NULL DEFAULT ''"
+                    )
+                    db.execSQL("ALTER TABLE bookings ADD COLUMN stayImage TEXT NOT NULL DEFAULT ''")
+                    db.execSQL(
+                        "ALTER TABLE bookings ADD COLUMN simulated INTEGER NOT NULL DEFAULT 1"
+                    )
+                    db.execSQL(
+                        "ALTER TABLE bookings ADD COLUMN cancellationPending INTEGER NOT NULL DEFAULT 0"
+                    )
+                    db.execSQL(
+                        "ALTER TABLE bookings ADD COLUMN requiresSupport INTEGER NOT NULL DEFAULT 0"
+                    )
+                    db.execSQL(
+                        "ALTER TABLE bookings ADD COLUMN paymentPending INTEGER NOT NULL DEFAULT 0"
+                    )
+                    db.execSQL(
+                        "ALTER TABLE bookings ADD COLUMN paymentFailed INTEGER NOT NULL DEFAULT 0"
+                    )
+                    for (id in listOf("kyoto", "alpine", "coast")) {
+                        val stay = BookedStay.legacy(id)
+                        db.execSQL(
+                            "UPDATE bookings SET stayName = ?, stayLocation = ?, stayCountry = ?, stayImage = ? WHERE stayId = ?",
+                            arrayOf(stay.name, stay.location, stay.country, stay.image, id),
+                        )
+                    }
+                }
+            }
+
         fun create(context: Context) =
             Room.databaseBuilder(context, RoamDatabase::class.java, "roam.db")
                 .setJournalMode(JournalMode.WRITE_AHEAD_LOGGING)
+                .addMigrations(MIGRATION_1_2)
                 .build()
     }
 }
@@ -199,6 +250,12 @@ private fun BookingRecord.domain() =
         Quote(nights, Money(subtotal), Money(fee), Money(total), Money(credit), Money(due)),
         createdAt,
         cancelled,
+        BookedStay(stayName, stayLocation, stayCountry, stayImage),
+        simulated,
+        cancellationPending,
+        requiresSupport,
+        paymentPending,
+        paymentFailed,
     )
 
 private fun Booking.record() =
@@ -218,4 +275,13 @@ private fun Booking.record() =
         quote.due.minor,
         createdAt,
         cancelled,
+        stay.name,
+        stay.location,
+        stay.country,
+        stay.image,
+        simulated,
+        cancellationPending,
+        requiresSupport,
+        paymentPending,
+        paymentFailed,
     )

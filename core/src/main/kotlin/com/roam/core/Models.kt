@@ -125,7 +125,54 @@ data class Quote(
     val total: Money,
     val credit: Money,
     val due: Money,
-)
+) {
+    init {
+        require(nights in 1..28) { "A quote must cover 1 to 28 nights" }
+        require(listOf(subtotal, serviceFee, total, credit, due).all { it.minor >= 0 }) {
+            "Quote amounts cannot be negative"
+        }
+        require(subtotal + serviceFee == total) { "Quote total does not balance" }
+        require(credit + due == total) { "Quote allocation does not balance" }
+    }
+}
+
+/** Display facts accepted with the booking, independent of later catalog changes. */
+data class BookedStay(
+    val name: String,
+    val location: String,
+    val country: String,
+    val image: String,
+) {
+    init {
+        require(name.isNotBlank()) { "A booked stay needs a display name" }
+    }
+
+    companion object {
+        fun from(stay: Stay) = BookedStay(stay.name, stay.location, stay.country, stay.image)
+
+        /** Frozen v1 fixture metadata. Do not resolve old bookings against the current catalog. */
+        fun legacy(stayId: String): BookedStay =
+            when (stayId) {
+                "kyoto" ->
+                    BookedStay("The quiet side of Kyoto", "Higashiyama, Kyoto", "Japan", "kyoto")
+                "alpine" ->
+                    BookedStay(
+                        "A little closer to the sky",
+                        "Dolomites, South Tyrol",
+                        "Italy",
+                        "alpine",
+                    )
+                "coast" ->
+                    BookedStay(
+                        "Where the coast slows down",
+                        "Ericeira, Lisbon",
+                        "Portugal",
+                        "coast",
+                    )
+                else -> BookedStay("Unavailable stay", "Location unavailable", "", "")
+            }
+    }
+}
 
 data class Booking(
     val id: String,
@@ -133,7 +180,28 @@ data class Booking(
     val quote: Quote,
     val createdAt: Long,
     val cancelled: Boolean = false,
-)
+    val stay: BookedStay = BookedStay.legacy(request.stayId),
+    val simulated: Boolean = true,
+    val cancellationPending: Boolean = false,
+    val requiresSupport: Boolean = false,
+    val paymentPending: Boolean = false,
+    val paymentFailed: Boolean = false,
+) {
+    init {
+        require(id.isNotBlank() && id.length <= 100) { "A valid confirmation is required" }
+        require(request.key.isNotBlank() && request.key.length <= 100) {
+            "A valid reservation key is required"
+        }
+        require(request.stayId.isNotBlank()) { "A stay identifier is required" }
+        require(request.guests in 1..20) { "Invalid historical guest count" }
+        require(ChronoUnit.DAYS.between(request.checkIn, request.checkOut) == quote.nights) {
+            "Booking dates do not match its quote"
+        }
+        require(request.useCredit || quote.credit.minor == 0L) {
+            "Credit was applied without being requested"
+        }
+    }
+}
 
 data class LedgerEntry(
     val id: String,
@@ -156,7 +224,11 @@ data class Account(
     val balance: Money = Money(8500),
     val saved: Set<String> = emptySet(),
     val redeemed: Set<String> = emptySet(),
-)
+) {
+    init {
+        require(balance.minor >= 0) { "Wallet balance cannot be negative" }
+    }
+}
 
 data class AccountSnapshot(
     val account: Account = Account(),
@@ -164,7 +236,7 @@ data class AccountSnapshot(
     val ledger: List<LedgerEntry> = emptyList(),
 )
 
-class CommerceException(message: String) : IllegalArgumentException(message)
+open class CommerceException(message: String) : IllegalArgumentException(message)
 
 object BookingPolicy {
     fun quote(request: BookingRequest, balance: Money, today: LocalDate): Quote {

@@ -1,7 +1,6 @@
 package com.roam.app
 
 import androidx.activity.compose.ReportDrawnWhen
-import androidx.annotation.DrawableRes
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -12,7 +11,7 @@ import coil3.compose.AsyncImage
 /** Constraint-sized decoding off the UI thread, backed by Coil's shared memory cache. */
 @Composable
 fun DestinationImage(
-    @DrawableRes resource: Int,
+    resource: Any,
     contentDescription: String?,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,

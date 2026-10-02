@@ -16,4 +16,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "Roam"
 
-include(":core", ":data", ":app", ":benchmark")
+include(":core", ":data", ":app", ":benchmark", ":network", ":server")

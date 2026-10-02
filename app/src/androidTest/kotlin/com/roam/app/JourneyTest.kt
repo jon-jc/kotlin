@@ -68,6 +68,9 @@ class JourneyTest {
         scroll("The quiet side of Kyoto")
         click("The quiet side of Kyoto")
         click("Make it your next")
+        compose.waitUntil(10_000) {
+            model.state.value.quote != null && !model.state.value.quoteLoading
+        }
         scroll("Confirm demo reservation")
     }
 

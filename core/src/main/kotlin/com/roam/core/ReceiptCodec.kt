@@ -62,8 +62,19 @@ data class ReceiptV1(
     }
 
     companion object {
-        fun from(booking: Booking) =
-            ReceiptV1(
+        fun from(booking: Booking): ReceiptV1 {
+            require(booking.simulated) {
+                "The v1 receipt format supports simulated reservations only"
+            }
+            require(
+                !booking.cancellationPending &&
+                    !booking.requiresSupport &&
+                    !booking.paymentPending &&
+                    !booking.paymentFailed
+            ) {
+                "The v1 receipt format requires a resolved reservation"
+            }
+            return ReceiptV1(
                 confirmation = booking.id,
                 stayId = booking.request.stayId,
                 status =
@@ -77,6 +88,7 @@ data class ReceiptV1(
                     MoneyV1.from(if (booking.cancelled) booking.quote.credit else Money(0)),
                 simulatedCardAmount = MoneyV1.from(booking.quote.due),
             )
+        }
     }
 }
 

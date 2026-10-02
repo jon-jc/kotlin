@@ -12,7 +12,7 @@ Open Wallet. Claim the $25 welcome benefit and observe the balance rise from $85
 
 Choose Kyoto for three nights, proceed to checkout, and leave credit enabled. Select **Demo controls → Response interrupted**, then confirm. The local transaction commits, but the interface simulates a lost acknowledgment. Choose **Recover my reservation**. One receipt appears and only one credit debit exists. Point to the unique request-key index, the service transaction, and the tests that run 24 retries at once.
 
-Explain the distinction between a local atomic transaction and a real payment-provider side effect. The architecture document describes the server-side authority and reconciliation needed for a deployed system.
+Explain the distinction between a local atomic transaction and a real payment-provider side effect. Then show the implemented Ktor/PostgreSQL service: occupied-night uniqueness, immutable accepted quotes, deterministic Stripe keys, and leased payment/refund reconciliation. In configured staging, demonstrate the same recovery through Stripe test mode.
 
 ## 4. Close the loop
 
@@ -20,9 +20,9 @@ Cancel before check-in. Credits are returned exactly once, and the original allo
 
 ## 5. Show what ownership looks like
 
-Edit the passport and hide hometown from the public preview. Show CI, the three milestone pull requests, native UI tests, and the benchmark traces. Discuss a bug caught on a device: a redundant snackbar covered retry controls, so the notification was removed instead of adding a delay to the test.
+Edit the passport and hide hometown from the public preview. Show CI, the milestone pull requests, native UI tests, and the benchmark traces. Discuss account isolation: each login owns a navigation entry, encrypted refresh credentials survive process recreation, and sign-out clears the entry and credential key. Show an actual review regression, such as a late refresh attempting to restore a signed-out session or a lost refund response recovered from a signed provider event.
 
-Be precise about the evidence: this is a portfolio app, not a previously shipped service at consumer scale. Performance results from an emulator validate the measurement pipeline; a physical-device matrix, accessibility service pass, production security review, backend integration, and a monitored rollout remain necessary before launch.
+Be precise about the evidence: this is an implemented portfolio product prepared for provider configuration, not a previously shipped service at consumer scale. Emulator performance validates the measurement pipeline. Real provider staging tests, physical-device measurements, accessibility service testing, operational controls and a monitored rollout remain necessary before launch.
 
 ## Useful code to discuss
 
@@ -33,3 +33,6 @@ Be precise about the evidence: this is a portfolio app, not a previously shipped
 * `data/CommerceIntegrationTest`: contention, rollback, cancellation, and disk reopen.
 * `app/JourneyTest`: complete journeys against real Room on an Android emulator.
 * `benchmark/RoamBenchmark`: reproducible cold-start and scroll measurement.
+* `network/RemoteCommerceGateway`: server status reconciliation and accepted-price validation.
+* `server/Commerce`: inventory, original credit allocation, provider recovery and worker fairness.
+* `server/CommerceIntegrationTest`: real PostgreSQL contention and controlled provider failure scenarios.

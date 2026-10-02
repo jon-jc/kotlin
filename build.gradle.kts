@@ -12,7 +12,14 @@ plugins {
 
 spotless {
     kotlin {
-        target("core/src/**/*.kt", "data/src/**/*.kt", "app/src/**/*.kt", "benchmark/src/**/*.kt")
+        target(
+            "core/src/**/*.kt",
+            "data/src/**/*.kt",
+            "app/src/**/*.kt",
+            "benchmark/src/**/*.kt",
+            "network/src/**/*.kt",
+            "server/src/**/*.kt",
+        )
         ktfmt("0.58").kotlinlangStyle()
     }
     kotlinGradle {

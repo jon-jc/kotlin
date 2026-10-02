@@ -4,6 +4,7 @@ import java.time.Clock
 import java.time.LocalDate
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 
 /** The store must serialize transactions and roll back every write if the block fails. */
 interface AccountStore {
@@ -30,14 +31,22 @@ class CommerceService(
     private val store: AccountStore,
     private val clock: Clock = Clock.systemDefaultZone(),
     private val newId: () -> String = { UUID.randomUUID().toString() },
-) {
-    val snapshots = store.observe()
+) : CommerceGateway {
+    override val snapshots = store.observe()
 
-    fun today(): LocalDate = LocalDate.now(clock)
+    override val catalog = flowOf(Catalog.stays)
 
-    suspend fun reserve(request: BookingRequest): Booking =
+    override val isDemo = true
+
+    override fun today(): LocalDate = LocalDate.now(clock)
+
+    override suspend fun quote(request: BookingRequest): Quote =
+        store.transaction { BookingPolicy.quote(request, account().balance, today()) }
+
+    override suspend fun reserve(request: BookingRequest): Booking =
         store.transaction {
             booking(request.key)?.let {
+                requireDemoBooking(it)
                 if (it.request != request)
                     throw CommerceException(
                         "This reservation key was already used for a different request."
@@ -46,14 +55,15 @@ class CommerceService(
             }
             val account = account()
             val quote = BookingPolicy.quote(request, account.balance, today())
-            val booking = Booking(newId(), request, quote, clock.millis())
+            val stay = BookedStay.from(Catalog.find(request.stayId))
+            val booking = Booking(newId(), request, quote, clock.millis(), stay = stay)
             save(account.copy(balance = account.balance - quote.credit))
             insert(booking)
             if (quote.credit.minor > 0)
                 append(
                     LedgerEntry(
                         newId(),
-                        "Stay · ${Catalog.find(request.stayId).country}",
+                        "Stay · ${stay.country}",
                         Money(-quote.credit.minor),
                         clock.millis(),
                         booking.id,
@@ -62,10 +72,11 @@ class CommerceService(
             booking
         }
 
-    suspend fun cancel(key: String): Booking =
+    override suspend fun cancel(key: String): Booking =
         store.transaction {
             val existing =
                 booking(key) ?: throw CommerceException("We couldn't find that reservation.")
+            requireDemoBooking(existing)
             if (existing.cancelled) return@transaction existing
             if (!today().isBefore(existing.request.checkIn))
                 throw CommerceException("Cancellation is available before check-in.")
@@ -77,7 +88,8 @@ class CommerceService(
                 append(
                     LedgerEntry(
                         newId(),
-                        "Credit returned · ${Catalog.find(existing.request.stayId).country}",
+                        if (existing.stay.country.isBlank()) "Credit returned"
+                        else "Credit returned · ${existing.stay.country}",
                         existing.quote.credit,
                         clock.millis(),
                         existing.id,
@@ -86,7 +98,7 @@ class CommerceService(
             cancelled
         }
 
-    suspend fun redeem(benefit: String) =
+    override suspend fun redeem(benefit: String) =
         store.transaction {
             val value =
                 when (benefit) {
@@ -111,7 +123,7 @@ class CommerceService(
             )
         }
 
-    suspend fun toggleSaved(id: String) =
+    override suspend fun toggleSaved(id: String) =
         store.transaction {
             Catalog.find(id)
             val current = account()
@@ -122,7 +134,7 @@ class CommerceService(
             )
         }
 
-    suspend fun editProfile(name: String, hometown: String, bio: String) =
+    override suspend fun editProfile(name: String, hometown: String, bio: String) =
         store.transaction {
             val current = account()
             save(
@@ -130,7 +142,7 @@ class CommerceService(
             )
         }
 
-    suspend fun setPrivacy(hometown: Boolean, activity: Boolean) =
+    override suspend fun setPrivacy(hometown: Boolean, activity: Boolean) =
         store.transaction {
             val current = account()
             save(
@@ -140,4 +152,15 @@ class CommerceService(
                 )
             )
         }
+
+    private fun requireDemoBooking(booking: Booking) {
+        if (
+            !booking.simulated ||
+                booking.cancellationPending ||
+                booking.requiresSupport ||
+                booking.paymentPending ||
+                booking.paymentFailed
+        )
+            throw CommerceException("This reservation must be managed with your connected account.")
+    }
 }

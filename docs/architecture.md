@@ -1,55 +1,61 @@
 # Architecture and engineering decisions
 
-Roam is an independent Android portfolio application for identity, community value, and travel commerce. The sample account, stays, credits, and card are fictional. A reservation simulates a payment locally. It does not reserve real inventory or charge money.
+Roam separates an offline portfolio demo from a connected travel-commerce product. Demo account, stays, credits and cards are fictional. The connected variant authenticates with Supabase and uses the Kotlin service as the authority for accounts, quotes, inventory and Stripe status. Missing configuration fails visibly; it never substitutes demo commerce.
 
 ## Boundaries
 
 ```mermaid
 flowchart LR
   UI[Compose screens] --> VM[ViewModel: intents and immutable state]
-  VM --> Core[CommerceService + BookingPolicy]
-  Core --> Port[AccountStore interface]
-  Port --> Room[RoomAccountStore]
-  Room --> DB[(SQLite WAL)]
-  DB --> Flow[Transactional snapshot Flow]
-  Flow --> VM
+  VM --> Gateway[CommerceGateway]
+  Gateway --> Demo[Demo CommerceService]
+  Demo --> Room[(Room / SQLite WAL)]
+  Gateway --> Remote[Session-scoped HTTP gateway]
+  Remote --> Service[Ktor service]
+  Service --> PG[(Private PostgreSQL schema)]
+  Service --> Stripe[Stripe payment / refund state]
+  Remote --> Auth[Supabase Auth]
 ```
 
-* `core`: pure Kotlin models, exact-money arithmetic, validation, business operations, and persistence ports. No Android dependency.
-* `data`: Room entities, indexed queries, transaction implementation, and schema history. The store serializes mutations. Failed blocks roll back all changes.
-* `app`: composition root, lifecycle-aware state, Compose features, accessibility, and navigation. Constructor injection keeps dependency ownership explicit; an application-scoped container owns the database and service.
-* `benchmark`: a separate Macrobenchmark APK drives a profileable, minified app build. Startup and scrolling produce machine-readable measurements and Perfetto traces.
+* `core`: pure Kotlin models, checked money arithmetic, demo policies, gateway/store ports, and shared wire contracts. No Android dependency.
+* `data`: Room entities, transactional snapshots, indexed requests and schema migration. Local account mutations commit or roll back together.
+* `network`: cancellable, bounded HTTP; Supabase token rotation; remote commerce. Concurrent refreshes serialize and credential-bearing requests never follow redirects.
+* `app`: lifecycle-aware Compose, typed intents and constructor injection. Each login's navigation entry owns its ViewModels and saved checkout state. Stripe collects card details through its native SDK.
+* `server`: authenticated Ktor API, private PostgreSQL schema, inventory constraints, immutable quotes, signed webhooks, provider idempotency, and leased background reconciliation.
+* `benchmark`: Macrobenchmark drives a profileable, minified demo build and retains measurements and Perfetto traces.
+
+## Account and session ownership
+
+Connected accounts never enter the demo database. JWT verification pins issuer, audience, asymmetric algorithms, role, expiry and non-anonymous identity. Account ownership derives from the verified token, never request fields. New accounts start with zero credit; self-reported profile fields are not identity verification.
+
+Android backup and device transfer are disabled. Credentials use Android Keystore AES-GCM with project/package-bound authenticated data and atomic storage in the backup-excluded directory. Logout removes ciphertext and its encryption key. Generation checks stop late token responses from restoring a signed-out session. A login identifier survives encrypted storage and token refresh, but changes on a fresh sign-in, including for the same user.
+
+Navigation entries isolate account ViewModels and saved state. Signing out or switching accounts discards the prior entry without saving its state for reuse. Payment secrets and email codes stay out of saved UI state. Profiles retain their server revision through editing; background refresh is deferred or cancelled while an editor owns a draft.
 
 ## Commerce invariants
 
-The client creates one reservation key for each checkout attempt. A retry with that key returns the original persisted receipt. Reusing the key with different dates, guest count, stay, or credit preference fails. The database also has a unique index on the key. The lookup, latest balance read, credit allocation, booking insert, and wallet ledger append happen in one database transaction.
+Amounts use checked 64-bit integer USD cents. Wire amounts are decimal strings so other platforms do not lose precision. Quotes preserve subtotal, service fee, total, original credit allocation and card due. Dates are civil dates, with cancellation evaluated in the property's IANA time zone.
 
-Every price is a signed 64-bit number of USD cents. Addition, subtraction, and multiplication detect overflow. The fixed sample service fee is 8%, rounded half up to a cent. The quote is recomputed inside the reservation transaction using the latest balance. Benefits and cancellation refunds use the same transactional boundary. Cancellation before check-in returns only the credits originally consumed and keeps the historical quote intact; retrying a cancellation cannot refund twice.
+The demo serializes balance, booking and ledger changes in one Room transaction. Connected checkout accepts a server-created five-minute quote and reserves each occupied night in `[checkIn, checkOut)` under PostgreSQL uniqueness constraints. Quotes alone do not hold inventory. A changed credit balance rejects the accepted quote instead of increasing the card charge. Per-account row locks serialize credit allocation, while night constraints prevent two accounts booking overlapping inventory.
 
-Observation reads account, bookings, and ledger in one transaction after database invalidation. Combining three independent table flows could expose a new balance with an old receipt; this implementation deliberately avoids that inconsistency.
+Stripe calls occur outside database transactions, using stable keys derived from the server reservation. The reservation is durable before those calls. A lost response remains an uncertain operation that can be looked up and reconciled. The phone cannot mark a payment confirmed; even a successful SDK callback only starts a server status check. Refund completion is likewise verified before releasing inventory or credit.
 
-## Scope and scaling
+The durable worker uses leases, due times and retry backoff. Stuck old requests cannot monopolize the oldest batch. Unknown provider operations older than the conservative idempotency window require review instead of blind recreation. Signed provider events can recover known IDs; unsolicited refunds raise support flags. See the [service runbook](../server/README.md) for operator recovery.
 
-The local store is the authority only for this demo. It demonstrates transaction boundaries, retry semantics, and persistence without external credentials. In a deployed system, a backend must be the authority for prices, availability, authorization, payment intent state, and fraud controls. Client-side balance checks are never an authorization mechanism. The API contract specifies that replacement boundary.
+Pending payment, failed payment, pending cancellation and support review remain visible with original prices and references. Recovery uses the stored immutable request even if the stay is no longer in discovery. Demo-only receipt-v1 exports reject connected and unresolved records rather than misrepresenting real financial activity.
 
-The catalog is a small bundled fixture. Real discovery needs server pagination, an indexed cache, image delivery, and cancellation-aware requests. Booking and ledger tables are indexed but the demo observes full lists; a large account would use Paging 3 and a separate aggregate balance query. These are explicit limits, not claims of measured production scale.
+## Rendering, accessibility and scope
 
-No identity documents, card numbers, access tokens, or telemetry leave the device. Android backup is disabled. The app requests no network permission. Local profile fields are user-editable demonstration data, not identity verification.
+Discovery uses stable keys and an adaptive lazy grid; wide windows use a navigation rail. Images decode asynchronously at the requested size and use Coil's shared cache. Demo photos are bundled. Connected inventory accepts HTTPS image URLs; unknown resources use a neutral fallback. `ReportDrawnWhen` includes visible image settlement, including errors.
 
-## Verification approach
+The image-loading design followed a trace finding of synchronous drawable decoding on the main thread. [Recorded v1 performance evidence](verification.md) reports both improvements and regressions without extrapolating emulator measurements to physical devices. The connected runtime requires fresh physical-device and network-condition profiling.
 
-Pure Kotlin tests cover date and occupancy boundaries, currency arithmetic, fee allocation, and input validation. Robolectric tests use real Room/SQLite transactions for races, unique-key conflicts, rollbacks, one-time redemption, cancellation, persistence, and process-style database reopening.
+Native semantics label controls, progress, headings and selection; primary touch targets are at least 48dp. Dark mode and adaptive layouts are implemented. English-only copy, comprehensive TalkBack/Switch Access verification, and a wider device/version matrix remain launch work.
 
-The ViewModel exposes one immutable state stream, accepts typed intents, and collects the transactional database stream. A `SavedStateHandle` retains checkout details and the exact request key across Android process recreation. Transient operations serialize at the UI boundary and again in the database; cancellation is propagated. After an interrupted response, checkout displays the persisted original quote and retries the same request key.
+PostgreSQL constraints and leased work permit multiple service instances, but no production throughput is claimed. Catalog and history responses are bounded; account history currently returns the newest 200 rows. Cursor paging, indexed discovery and richer history must be added before crossing those limits. Taxes, payouts, disputes, channel-manager inventory, commercial policies and support operations depend on the actual business.
 
-Seven ViewModel tests cover duplicate taps, decline isolation, lost-response recovery, restored checkout, frozen in-flight input, profile validation, and composed discovery filters. Five native Compose tests exercise complete user journeys against isolated Room databases on API 35, including the real FileProvider receipt export. They assert eventual observable state after asynchronous persistence, not timing assumptions. Seven receipt tests enforce schema evolution, privacy boundaries, and exact cross-platform amounts.
+## Verification
 
-## Rendering and startup
+Unit and integration suites exercise arithmetic, snapshot history, real SQLite migrations, signed tokens, real PostgreSQL contention, provider failures, HTTP cancellation and account isolation. Native tests exercise complete journeys, payment-state presentation, session navigation and Keystore storage. Provider adapters in tests are controlled substitutes, not evidence that your deployed Stripe or email configuration works. Follow the [connected setup](connected-setup.md) for those staging checks.
 
-Discovery uses stable item keys and an adaptive lazy grid. Destination photos are bundled for offline reliability, decoded asynchronously at the component's requested size, and reused through Coil's process-wide image loader and memory cache. No network image module is included. `DestinationImage` participates in `ReportDrawnWhen`, so startup measurement waits for visible images to settle as well as the account snapshot. Failed image loads settle the reporter and display a theme-colored fallback.
-
-This design followed a trace finding: synchronous drawable decoding in lazy composition occupied about 22 ms of the UI thread during a measured scroll. The [verification report](verification.md) records the before/after measurements and their emulator limitations. A real catalog would also need appropriately sized CDN images, placeholders, paging, cancellation, and a device-specific cache budget.
-
-The layout uses a navigation rail on wide windows and an adaptive discovery grid. Dark colors follow the system. Interactive icons have meaningful accessibility labels; headings, selectable controls, and form fields expose native semantics. Primary controls are at least 48dp. The sample copy is English-only; a production localization pass would extract it to resources and include pseudolocale/RTL testing.
-
-References: [Android architecture recommendations](https://developer.android.com/topic/architecture/recommendations), [Room transactions](https://developer.android.com/reference/androidx/room/Transaction), [Compose state](https://developer.android.com/develop/ui/compose/state), [Coil Compose image sizing](https://coil-kt.github.io/coil/compose/).
+References: [Android architecture](https://developer.android.com/topic/architecture/recommendations), [Room transactions](https://developer.android.com/reference/androidx/room/Transaction), [Compose state](https://developer.android.com/develop/ui/compose/state), [Coil sizing](https://coil-kt.github.io/coil/compose/).

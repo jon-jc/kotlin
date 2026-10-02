@@ -6,6 +6,7 @@ import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.*
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.*
 import androidx.compose.material.icons.outlined.*
@@ -28,7 +29,18 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun StayDetail(state: RoamState, today: LocalDate, accept: (Intent) -> Unit) {
-    val stay = Catalog.find(state.screen.selectedStay!!)
+    val stay = state.catalog.firstOrNull { it.id == state.screen.selectedStay }
+    if (stay == null) {
+        EmptyState(
+            Icons.Outlined.TravelExplore,
+            "This stay is unavailable",
+            "Choose another place for your next chapter.",
+            "Back to explore",
+        ) {
+            accept(Intent.Navigate(Destination.Explore))
+        }
+        return
+    }
     var datePicker by rememberSaveable { mutableStateOf(false) }
     Scaffold(
         bottomBar = {
@@ -107,54 +119,56 @@ fun StayDetail(state: RoamState, today: LocalDate, accept: (Intent) -> Unit) {
                         style = MaterialTheme.typography.headlineLarge,
                         modifier = Modifier.semantics { heading() },
                     )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            Icons.Outlined.Star,
-                            null,
-                            Modifier.size(17.dp),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                        Text(
-                            "${stay.rating} · ${stay.reviews} sample reviews",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
-                    }
+                    if (stay.rating.isNotBlank() && stay.reviews > 0)
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Outlined.Star,
+                                null,
+                                Modifier.size(17.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                            Text(
+                                "${stay.rating} · ${stay.reviews} ${if (state.isDemo) "sample reviews" else "reviews"}",
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
                     Text(
                         stay.location,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.secondaryContainer,
+                    if (stay.host.isNotBlank())
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            Text(
-                                stay.host.take(1),
-                                Modifier.padding(16.dp),
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            )
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                            ) {
+                                Text(
+                                    stay.host.take(1),
+                                    Modifier.padding(16.dp),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                )
+                            }
+                            Column {
+                                Text(
+                                    "A warm welcome from ${stay.host}",
+                                    style = MaterialTheme.typography.titleMedium,
+                                )
+                                Text(
+                                    "Your local host · Up to ${stay.maxGuests} guests",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
-                        Column {
-                            Text(
-                                "A warm welcome from ${stay.host}",
-                                style = MaterialTheme.typography.titleMedium,
-                            )
-                            Text(
-                                "Your local host · Up to ${stay.maxGuests} guests",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
                     Text(stay.description, style = MaterialTheme.typography.bodyLarge)
                 }
             }
@@ -175,6 +189,7 @@ fun StayDetail(state: RoamState, today: LocalDate, accept: (Intent) -> Unit) {
                     }
                 }
             }
+            item { Box(Modifier.padding(horizontal = 24.dp)) { ErrorMessage(state.screen.error) } }
             item {
                 Column(
                     Modifier.padding(horizontal = 24.dp),
@@ -195,16 +210,20 @@ fun StayDetail(state: RoamState, today: LocalDate, accept: (Intent) -> Unit) {
                             style = MaterialTheme.typography.titleMedium,
                         )
                         Text(
-                            "Cancel before check-in for a full return of travel credits. This demo simulates the remaining card payment; no money moves.",
+                            if (state.isDemo)
+                                "Cancel before check-in for a full return of travel credits. This demo simulates the remaining card payment; no money moves."
+                            else
+                                "Review the cancellation terms and payment details before confirming your reservation.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                    Text(
-                        "Destination imagery is illustrative. Stays and reviews are fictional.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    if (state.isDemo)
+                        Text(
+                            "Destination imagery is illustrative. Stays and reviews are fictional.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                 }
             }
         }
@@ -253,7 +272,18 @@ fun StayDetail(state: RoamState, today: LocalDate, accept: (Intent) -> Unit) {
 
 @Composable
 fun CheckoutScreen(state: RoamState, quote: Quote?, accept: (Intent) -> Unit) {
-    val stay = Catalog.find(state.screen.selectedStay!!)
+    val stay = state.catalog.firstOrNull { it.id == state.screen.selectedStay }
+    if (stay == null) {
+        EmptyState(
+            Icons.Outlined.TravelExplore,
+            "This stay is unavailable",
+            "Choose another place for your next chapter.",
+            "Back to explore",
+        ) {
+            accept(Intent.Navigate(Destination.Explore))
+        }
+        return
+    }
     LazyColumn(
         contentPadding = PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
@@ -330,7 +360,9 @@ fun CheckoutScreen(state: RoamState, quote: Quote?, accept: (Intent) -> Unit) {
                     )
                 }
                 Text(
-                    "Credits are applied before the sample card. Your final allocation is checked when you confirm.",
+                    if (state.isDemo)
+                        "Credits are applied before the sample card. Your final allocation is checked when you confirm."
+                    else "Your travel credit and card payment are included in the price below.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -340,16 +372,31 @@ fun CheckoutScreen(state: RoamState, quote: Quote?, accept: (Intent) -> Unit) {
             SurfaceCard {
                 SectionHeading("Every detail, up front")
                 if (quote != null) {
-                    PriceRow("${stay.nightly.formatted()} × ${quote.nights} nights", quote.subtotal)
-                    PriceRow("Service fee (8%)", quote.serviceFee)
+                    PriceRow("Stay · ${quote.nights} nights", quote.subtotal)
+                    PriceRow(
+                        if (state.isDemo) "Service fee (8%)" else "Service fee",
+                        quote.serviceFee,
+                    )
                     PriceRow("Travel credit", quote.credit, credit = true)
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    PriceRow("Sample card total", quote.due, emphasized = true)
-                } else
-                    Text(
-                        "These dates are no longer available. Go back to choose a new check-in date.",
-                        color = MaterialTheme.colorScheme.error,
+                    PriceRow(
+                        if (state.isDemo) "Sample card total" else "Card payment",
+                        quote.due,
+                        emphasized = true,
                     )
+                } else if (state.quoteLoading) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        CircularProgressIndicator(Modifier.size(24.dp))
+                        Text("Checking your price…")
+                    }
+                }
+                ErrorMessage(state.quoteError)
+                if (!state.screen.busy && !state.quoteLoading) {
+                    TextButton({ accept(Intent.RetryQuote) }) { Text("Refresh price") }
+                }
             }
         }
         item {
@@ -359,9 +406,13 @@ fun CheckoutScreen(state: RoamState, quote: Quote?, accept: (Intent) -> Unit) {
             ) {
                 Icon(Icons.Outlined.CreditCard, null, tint = MaterialTheme.colorScheme.secondary)
                 Column {
-                    Text("Roam test card · 4242", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        "Simulated payment. No real charge.",
+                        if (state.isDemo) "Roam test card · 4242" else "Secure card payment",
+                        style = MaterialTheme.typography.titleMedium,
+                    )
+                    Text(
+                        if (state.isDemo) "Simulated payment. No real charge."
+                        else "Complete payment securely with Stripe.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -374,19 +425,23 @@ fun CheckoutScreen(state: RoamState, quote: Quote?, accept: (Intent) -> Unit) {
                 PrimaryButton(
                     if (state.screen.error?.contains("response was interrupted") == true)
                         "Recover my reservation"
-                    else "Confirm demo reservation",
+                    else if (state.isDemo) "Confirm demo reservation" else "Continue to payment",
                     { accept(Intent.Reserve) },
-                    enabled = quote != null,
+                    enabled = quote != null && !state.quoteLoading,
                     busy = state.screen.busy,
                 )
                 Text(
-                    "Free cancellation before check-in. This is a fictional stay using sample inventory and a simulated card payment.",
+                    if (state.isDemo)
+                        "Free cancellation before check-in. This is a fictional stay using sample inventory and a simulated card payment."
+                    else
+                        "Your reservation is confirmed only after payment is verified. Retrying a pending request keeps the same reservation reference.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                TextButton({ accept(Intent.Demo(true)) }, Modifier.heightIn(min = 48.dp)) {
-                    Text("Demo controls · ${state.screen.demoMode.name}")
-                }
+                if (state.isDemo)
+                    TextButton({ accept(Intent.Demo(true)) }, Modifier.heightIn(min = 48.dp)) {
+                        Text("Demo controls · ${state.screen.demoMode.name}")
+                    }
             }
         }
     }
@@ -398,6 +453,7 @@ fun ReceiptScreen(
     today: LocalDate,
     busy: Boolean,
     error: String?,
+    isDemo: Boolean,
     accept: (Intent) -> Unit,
 ) {
     var confirmCancel by rememberSaveable { mutableStateOf(false) }
@@ -406,12 +462,19 @@ fun ReceiptScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     if (booking == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
+        EmptyState(
+            Icons.Outlined.ReceiptLong,
+            "Receipt unavailable",
+            "This reservation could not be found in your account.",
+            "Go back",
+        ) {
+            accept(Intent.Back)
         }
         return
     }
-    val stay = Catalog.find(booking.request.stayId)
+    val stay = booking.stay
+    val unresolved = booking.cancellationPending || booking.requiresSupport
+    val canExport = isDemo && !unresolved && !booking.paymentPending && !booking.paymentFailed
     LazyColumn(
         contentPadding = PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
@@ -420,7 +483,11 @@ fun ReceiptScreen(
         item {
             Surface(shape = CircleShape, color = MaterialTheme.colorScheme.secondaryContainer) {
                 Icon(
-                    if (booking.cancelled) Icons.AutoMirrored.Outlined.Undo
+                    if (booking.requiresSupport) Icons.Outlined.SupportAgent
+                    else if (booking.cancellationPending) Icons.Outlined.HourglassEmpty
+                    else if (booking.paymentPending) Icons.Outlined.Payment
+                    else if (booking.paymentFailed) Icons.Outlined.ErrorOutline
+                    else if (booking.cancelled) Icons.AutoMirrored.Outlined.Undo
                     else Icons.Outlined.Check,
                     null,
                     Modifier.padding(18.dp).size(32.dp),
@@ -430,11 +497,31 @@ fun ReceiptScreen(
         }
         item {
             PageHeading(
-                if (booking.cancelled) "PLANS CHANGE" else "IT'S IN YOUR PASSPORT",
-                if (booking.cancelled) "Until the next\nadventure."
+                if (booking.requiresSupport) "A LITTLE HELP IS NEEDED"
+                else if (booking.cancellationPending) "CANCELLATION IN PROGRESS"
+                else if (booking.paymentPending) "PAYMENT PENDING"
+                else if (booking.paymentFailed) "PAYMENT NOT COMPLETED"
+                else if (booking.cancelled) "PLANS CHANGE" else "IT'S IN YOUR PASSPORT",
+                if (booking.requiresSupport) "Your reservation\nneeds a review."
+                else if (booking.cancellationPending) "We're checking\nyour cancellation."
+                else if (booking.paymentPending) "Your payment\nisn't finished."
+                else if (booking.paymentFailed) "Let's find your\nnext chapter."
+                else if (booking.cancelled) "Until the next\nadventure."
                 else "You're going\nsomewhere good.",
-                if (booking.cancelled) "Travel credits returned. Your original receipt is below."
-                else "Your demo reservation is confirmed.",
+                if (booking.requiresSupport)
+                    "Contact your booking provider with the reference below. Your payment status needs to be checked."
+                else if (booking.cancellationPending)
+                    "Cancellation and any refund are still being processed. Refresh your account to check for an update."
+                else if (booking.paymentPending)
+                    "Complete payment or check its status before your reservation can be confirmed."
+                else if (booking.paymentFailed)
+                    "This payment did not complete. Your reservation is not confirmed. Find a stay to start a new request."
+                else if (booking.cancelled && isDemo)
+                    "Travel credits returned. Your original receipt is below."
+                else if (booking.cancelled)
+                    "Your reservation is cancelled. Your original payment details are below."
+                else if (isDemo) "Your demo reservation is confirmed."
+                else "Your reservation is confirmed.",
             )
         }
         item {
@@ -459,56 +546,96 @@ fun ReceiptScreen(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 PriceRow("Stay + service fee", booking.quote.total)
                 PriceRow(
-                    "Credits ${if (booking.cancelled) "returned" else "used"}",
+                    "Credits ${if (booking.cancelled && !unresolved) "returned" else "applied"}",
                     booking.quote.credit,
                 )
                 PriceRow(
-                    "${if (booking.cancelled) "Voided" else "Simulated"} card payment",
+                    if (isDemo) "${if (booking.cancelled) "Voided" else "Simulated"} card payment"
+                    else if (booking.paymentPending || booking.paymentFailed)
+                        "Card payment requested"
+                    else "Original card payment",
                     booking.quote.due,
                 )
-                Eyebrow("CONFIRMATION · ${booking.id.take(8).uppercase()}")
-                Text(
-                    "Sample card · No money was charged",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Eyebrow(
+                    "${if (booking.paymentPending || booking.paymentFailed || unresolved) "RESERVATION" else "CONFIRMATION"} · ${booking.id.take(8).uppercase()}"
                 )
+                if (booking.requiresSupport)
+                    SelectionContainer {
+                        Text(
+                            "Support reference: ${booking.id}",
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                if (isDemo || booking.simulated)
+                    Text(
+                        if (isDemo) "Sample card · No money was charged"
+                        else "Stripe test payment · No real money was charged",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
             }
         }
         item { ErrorMessage(error) }
         item { ErrorMessage(exportError) }
         item {
-            PrimaryButton("Back to my trips", { accept(Intent.Navigate(Destination.Trips)) })
-            OutlinedButton(
-                onClick = {
-                    exporting = true
-                    scope.launch {
-                        try {
-                            exportError = null
-                            exportReceipt(context, booking)
-                        } catch (e: CancellationException) {
-                            throw e
-                        } catch (_: Exception) {
-                            exportError = "The receipt couldn't be exported. Please try again."
-                        } finally {
-                            exporting = false
-                        }
-                    }
-                },
-                enabled = !exporting,
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp).heightIn(min = 52.dp),
-                shape = RoundedCornerShape(16.dp),
-            ) {
-                Icon(Icons.Outlined.IosShare, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(8.dp))
-                Text("Export receipt")
+            if (booking.paymentPending && !unresolved) {
+                PrimaryButton(
+                    "Continue payment",
+                    { accept(Intent.ResumePayment(booking.request.key)) },
+                    busy = busy,
+                )
+                Spacer(Modifier.height(12.dp))
             }
-            Text(
-                "A portable JSON copy, without profile details.",
-                style = MaterialTheme.typography.bodySmall,
-                modifier = Modifier.padding(top = 8.dp),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            if (booking.paymentFailed && !unresolved) {
+                PrimaryButton("Explore stays", { accept(Intent.Navigate(Destination.Explore)) })
+                Spacer(Modifier.height(12.dp))
+            }
+            PrimaryButton("Back to my trips", { accept(Intent.Navigate(Destination.Trips)) })
+            if (canExport)
+                OutlinedButton(
+                    onClick = {
+                        exporting = true
+                        scope.launch {
+                            try {
+                                exportError = null
+                                exportReceipt(context, booking)
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (_: Exception) {
+                                exportError = "The receipt couldn't be exported. Please try again."
+                            } finally {
+                                exporting = false
+                            }
+                        }
+                    },
+                    enabled = !exporting,
+                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp).heightIn(min = 52.dp),
+                    shape = RoundedCornerShape(16.dp),
+                ) {
+                    Icon(Icons.Outlined.IosShare, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Export receipt")
+                }
+            if (canExport)
+                Text(
+                    "A portable JSON copy, without profile details.",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 8.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            if (unresolved || booking.paymentPending)
+                TextButton(
+                    { accept(Intent.RefreshAccount) },
+                    Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                ) {
+                    Text("Refresh reservation")
+                }
+            if (
+                !booking.cancelled &&
+                    !unresolved &&
+                    !booking.paymentFailed &&
+                    (!isDemo || today.isBefore(booking.request.checkIn))
             )
-            if (!booking.cancelled && today.isBefore(booking.request.checkIn))
                 TextButton(
                     { confirmCancel = true },
                     Modifier.fillMaxWidth().heightIn(min = 48.dp),
@@ -525,7 +652,10 @@ fun ReceiptScreen(
             title = { Text("Cancel this chapter?") },
             text = {
                 Text(
-                    "${booking.quote.credit.formatted()} in travel credits will be returned to your wallet. The sample card payment will be marked void."
+                    if (isDemo)
+                        "${booking.quote.credit.formatted()} in travel credits will be returned to your wallet. The sample card payment will be marked void."
+                    else
+                        "Cancel this reservation and request the applicable payment refund? Refunds may take time to appear with your payment provider."
                 )
             },
             confirmButton = {

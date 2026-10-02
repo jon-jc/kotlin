@@ -18,11 +18,16 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
-fun RoamApp(viewModel: RoamViewModel) {
+fun RoamApp(
+    viewModel: RoamViewModel,
+    onSignOut: (() -> Unit)? = null,
+    sessionError: String? = null,
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
-    ReportDrawnWhen { state.loaded }
+    ReportDrawnWhen { state.loaded || state.loadError != null }
     val accept = viewModel::accept
     val snackbar = remember { SnackbarHostState() }
+    LaunchedEffect(sessionError) { sessionError?.let { snackbar.showSnackbar(it) } }
     val screen = state.screen
     val detail = screen.selectedStay != null || screen.receipt != null
     BackHandler(detail) { accept(Intent.Back) }
@@ -51,6 +56,7 @@ fun RoamApp(viewModel: RoamViewModel) {
                     ) {
                         navigation.forEach { (destination, icon) ->
                             NavigationBarItem(
+                                enabled = !screen.busy,
                                 selected = screen.destination == destination,
                                 onClick = { accept(Intent.Navigate(destination)) },
                                 icon = { Icon(icon, null) },
@@ -77,6 +83,7 @@ fun RoamApp(viewModel: RoamViewModel) {
                         Spacer(Modifier.height(32.dp))
                         navigation.forEach { (destination, icon) ->
                             NavigationRailItem(
+                                enabled = !screen.busy,
                                 selected = screen.destination == destination,
                                 onClick = { accept(Intent.Navigate(destination)) },
                                 icon = { Icon(icon, null) },
@@ -96,13 +103,23 @@ fun RoamApp(viewModel: RoamViewModel) {
                     ) {
                         when {
                             state.loadError != null ->
-                                EmptyState(
-                                    Icons.Outlined.CloudOff,
-                                    "A small detour",
-                                    state.loadError!!,
-                                    "Try again",
+                                Column(
+                                    Modifier.fillMaxWidth()
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(24.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
                                 ) {
-                                    accept(Intent.RetryLoad)
+                                    EmptyState(
+                                        Icons.Outlined.CloudOff,
+                                        "A small detour",
+                                        state.loadError!!,
+                                        "Try again",
+                                    ) {
+                                        accept(Intent.RetryLoad)
+                                    }
+                                    onSignOut?.let { signOut ->
+                                        TextButton(signOut) { Text("Sign out") }
+                                    }
                                 }
                             !state.loaded ->
                                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -120,26 +137,27 @@ fun RoamApp(viewModel: RoamViewModel) {
                                     viewModel.today(),
                                     screen.busy,
                                     screen.error,
+                                    state.isDemo,
                                     accept,
                                 )
                             screen.selectedStay != null && screen.checkout ->
-                                CheckoutScreen(state, viewModel.quote(), accept)
+                                CheckoutScreen(state, state.quote, accept)
                             screen.selectedStay != null ->
                                 StayDetail(state, viewModel.today(), accept)
                             screen.destination == Destination.Explore ->
                                 ExploreScreen(state, accept)
                             screen.destination == Destination.Trips -> TripsScreen(state, accept)
                             screen.destination == Destination.Wallet -> WalletScreen(state, accept)
-                            else -> PassportScreen(state, accept)
+                            else -> PassportScreen(state, accept, onSignOut)
                         }
                     }
                 }
             }
         }
     }
-    if (screen.profileEditor) ProfileDialog(state, accept)
-    if (screen.privacyEditor) PrivacyDialog(state, accept)
-    if (screen.demoEditor) DemoDialog(state, accept)
+    if (state.loaded && screen.profileEditor) ProfileDialog(state, accept)
+    if (state.loaded && screen.privacyEditor) PrivacyDialog(state, accept)
+    if (state.loaded && state.isDemo && screen.demoEditor) DemoDialog(state, accept)
 }
 
 @Composable
@@ -224,6 +242,7 @@ private fun PrivacyDialog(state: RoamState, accept: (Intent) -> Unit) {
                         hometown,
                         { hometown = it },
                         Modifier.semantics { contentDescription = "Show hometown" },
+                        enabled = !state.screen.busy,
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -232,6 +251,7 @@ private fun PrivacyDialog(state: RoamState, accept: (Intent) -> Unit) {
                         activity,
                         { activity = it },
                         Modifier.semantics { contentDescription = "Show travel activity" },
+                        enabled = !state.screen.busy,
                     )
                 }
                 ErrorMessage(state.screen.error)
@@ -245,7 +265,11 @@ private fun PrivacyDialog(state: RoamState, accept: (Intent) -> Unit) {
                 Text("Save privacy")
             }
         },
-        dismissButton = { TextButton({ accept(Intent.Privacy(false)) }) { Text("Cancel") } },
+        dismissButton = {
+            TextButton({ accept(Intent.Privacy(false)) }, enabled = !state.screen.busy) {
+                Text("Cancel")
+            }
+        },
     )
 }
 
