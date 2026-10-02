@@ -99,6 +99,136 @@ class CommerceIntegrationTest {
     }
 
     @Test
+    fun `reservation snapshots round trip independently of active inventory`() = runTest {
+        val original = service.reserve(request)
+        assertEquals(BookedStay.from(Catalog.find(request.stayId)), original.stay)
+        val archived =
+            original.copy(
+                request = original.request.copy(stayId = "retired-listing"),
+                stay =
+                    BookedStay("An original name", "An original location", "Original country", ""),
+            )
+        store.transaction { update(archived) }
+        val restored = service.snapshots.first().bookings.single()
+        assertEquals(archived, restored)
+        assertEquals(archived, service.reserve(archived.request))
+        val cancelled = service.cancel(archived.request.key)
+        assertEquals(archived.stay, cancelled.stay)
+        assertEquals(archived.quote, cancelled.quote)
+        assertEquals(8500, service.snapshots.first().account.balance.minor)
+        assertEquals(
+            "Credit returned · Original country",
+            service.snapshots.first().ledger.single { it.amount.minor > 0 }.title,
+        )
+    }
+
+    @Test
+    fun `refund append failure rolls back cancellation and balance`() = runTest {
+        val ids = ArrayDeque(listOf("booking", "debit", "debit"))
+        val failing = CommerceService(store, clock) { ids.removeFirst() }
+        val original = failing.reserve(request)
+        val before = failing.snapshots.first()
+        try {
+            failing.cancel(request.key)
+            fail("Expected ledger constraint failure")
+        } catch (_: android.database.sqlite.SQLiteConstraintException) {}
+        assertEquals(before, failing.snapshots.first())
+        assertEquals(original, failing.reserve(request))
+    }
+
+    @Test
+    fun `cancelled coroutine rolls back writes rather than committing a partial reservation`() =
+        runTest {
+            val before = service.snapshots.first()
+            val booking =
+                Booking(
+                    "interrupted-booking",
+                    request,
+                    BookingPolicy.quote(request, before.account.balance, service.today()),
+                    0,
+                )
+            val writesFinished = CompletableDeferred<Unit>()
+            val transaction =
+                launch(Dispatchers.IO) {
+                    store.transaction {
+                        save(account().copy(balance = Money(0)))
+                        insert(booking)
+                        writesFinished.complete(Unit)
+                        awaitCancellation()
+                    }
+                }
+            writesFinished.await()
+            transaction.cancelAndJoin()
+            assertEquals(before, service.snapshots.first())
+        }
+
+    @Test
+    fun `invalid persisted allocation cannot change the wallet during cancellation`() = runTest {
+        service.reserve(request)
+        db.openHelper.writableDatabase.execSQL("UPDATE bookings SET credit = -1")
+        try {
+            service.cancel(request.key)
+            fail("Expected invalid historical allocation")
+        } catch (_: IllegalArgumentException) {}
+        assertEquals(0, db.dao().account().balance)
+        assertFalse(db.dao().booking(request.key)!!.cancelled)
+        assertEquals(1, db.dao().ledger().size)
+    }
+
+    @Test
+    fun `local commerce refuses to manage a live reservation`() = runTest {
+        val demo = service.reserve(request)
+        store.transaction { update(demo.copy(simulated = false)) }
+        val before = service.snapshots.first()
+        assertFalse(before.bookings.single().simulated)
+        try {
+            service.cancel(request.key)
+            fail("Expected a connected account requirement")
+        } catch (_: CommerceException) {}
+        try {
+            service.reserve(request)
+            fail("Expected a connected account requirement")
+        } catch (_: CommerceException) {}
+        assertEquals(before, service.snapshots.first())
+    }
+
+    @Test
+    fun `pending and support flags survive storage and cannot be resolved by demo commerce`() =
+        runTest {
+            val original = service.reserve(request)
+            val pendingStates =
+                listOf(
+                    original.copy(cancellationPending = true),
+                    original.copy(requiresSupport = true),
+                    original.copy(paymentPending = true),
+                    original.copy(paymentFailed = true),
+                )
+            for (pending in pendingStates) {
+                store.transaction { update(pending) }
+                val before = service.snapshots.first()
+                assertEquals(pending, before.bookings.single())
+                try {
+                    service.cancel(request.key)
+                    fail("Expected a connected account requirement")
+                } catch (_: CommerceException) {}
+                assertEquals(before, service.snapshots.first())
+            }
+        }
+
+    @Test
+    fun `gateway quote uses the latest wallet without mutating it`() = runTest {
+        val gateway: CommerceGateway = service
+        assertTrue(gateway.isDemo)
+        assertEquals(Catalog.stays, gateway.catalog.first())
+        assertEquals(8500, gateway.quote(request).credit.minor)
+        service.redeem("welcome")
+        val before = service.snapshots.first()
+        assertEquals(11000, gateway.quote(request).credit.minor)
+        gateway.refresh()
+        assertEquals(before, service.snapshots.first())
+    }
+
+    @Test
     fun `cancel at check-in is rejected`() = runTest {
         service.reserve(
             request.copy(checkIn = service.today(), checkOut = service.today().plusDays(1))
@@ -111,7 +241,7 @@ class CommerceIntegrationTest {
     }
 
     @Test
-    fun `failed transaction rolls back debit and booking together`() = runTest {
+    fun `failed transaction rolls back balance and ledger together`() = runTest {
         service.snapshots.first()
         try {
             store.transaction {

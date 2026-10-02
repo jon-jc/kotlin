@@ -43,6 +43,28 @@ class ReceiptContractTest {
     }
 
     @Test
+    fun `live bookings cannot be mislabeled as simulated receipts`() {
+        val live = booking.copy(simulated = false)
+        assertThrows(IllegalArgumentException::class.java) { ReceiptV1.from(live) }
+        assertThrows(IllegalArgumentException::class.java) { ReceiptCodec.encode(live) }
+    }
+
+    @Test
+    fun `unresolved and support reservations cannot be exported as confirmed demo receipts`() {
+        listOf(
+                booking.copy(cancellationPending = true),
+                booking.copy(requiresSupport = true),
+                booking.copy(paymentPending = true),
+                booking.copy(paymentFailed = true),
+            )
+            .forEach { unresolved ->
+                assertThrows(IllegalArgumentException::class.java) {
+                    ReceiptCodec.encode(unresolved)
+                }
+            }
+    }
+
+    @Test
     fun `cancelled receipt preserves original allocation and reports refund`() {
         val receipt = ReceiptCodec.decode(ReceiptCodec.encode(booking.copy(cancelled = true)))
         assertEquals(ReceiptStatus.Cancelled, receipt.status)

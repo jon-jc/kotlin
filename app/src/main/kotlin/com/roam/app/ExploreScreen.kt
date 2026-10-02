@@ -105,13 +105,16 @@ fun ExploreScreen(state: RoamState, accept: (Intent) -> Unit) {
                 Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                listOf(
-                        "All stays" to Icons.Outlined.AutoAwesome,
-                        "Nature" to Icons.Outlined.Terrain,
-                        "Coast" to Icons.Outlined.Waves,
-                        "City" to Icons.Outlined.Apartment,
-                    )
-                    .forEach { (label, icon) ->
+                (listOf("All stays") +
+                        state.catalog.map { it.category }.filter { it.isNotBlank() }.distinct())
+                    .forEach { label ->
+                        val icon =
+                            when (label) {
+                                "Nature" -> Icons.Outlined.Terrain
+                                "Coast" -> Icons.Outlined.Waves
+                                "City" -> Icons.Outlined.Apartment
+                                else -> Icons.Outlined.AutoAwesome
+                            }
                         FilterChip(
                             selected = state.screen.category == label,
                             onClick = { accept(Intent.Category(label)) },
@@ -130,6 +133,7 @@ fun ExploreScreen(state: RoamState, accept: (Intent) -> Unit) {
                 "${state.stays.size} stays",
             )
         }
+        item(span = { GridItemSpan(maxLineSpan) }) { ErrorMessage(state.screen.error) }
         if (state.stays.isEmpty())
             item(span = { GridItemSpan(maxLineSpan) }) {
                 EmptyState(
@@ -161,7 +165,8 @@ fun ExploreScreen(state: RoamState, accept: (Intent) -> Unit) {
                 Icon(Icons.Outlined.Public, null, tint = MaterialTheme.colorScheme.secondary)
                 Text("Less ordinary. More you.", fontFamily = Serif, fontSize = 20.sp)
                 Text(
-                    "An independent travel concept · Demo stays",
+                    if (state.isDemo) "An independent travel concept · Demo stays"
+                    else "Find your next place to belong.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -200,18 +205,19 @@ fun StayCard(
                         )
                     )
             )
-            Surface(
-                Modifier.align(Alignment.TopStart).padding(14.dp),
-                color = Cream,
-                shape = RoundedCornerShape(50),
-            ) {
-                Text(
-                    "GUEST FAVORITE",
-                    Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Ink,
-                )
-            }
+            if (stay.rating.isNotBlank() && stay.reviews > 0)
+                Surface(
+                    Modifier.align(Alignment.TopStart).padding(14.dp),
+                    color = Cream,
+                    shape = RoundedCornerShape(50),
+                ) {
+                    Text(
+                        "GUEST FAVORITE",
+                        Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Ink,
+                    )
+                }
             RoundButton(
                 if (saved) Icons.Outlined.Favorite else Icons.Outlined.FavoriteBorder,
                 if (saved) "Unsave ${stay.name}" else "Save ${stay.name}",
@@ -238,21 +244,25 @@ fun StayCard(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(stay.name, Modifier.weight(1f), style = MaterialTheme.typography.headlineSmall)
-                Icon(
-                    Icons.Outlined.Star,
-                    null,
-                    Modifier.padding(start = 8.dp, end = 3.dp).size(14.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Text(stay.rating, style = MaterialTheme.typography.labelMedium)
+                if (stay.rating.isNotBlank())
+                    Icon(
+                        Icons.Outlined.Star,
+                        null,
+                        Modifier.padding(start = 8.dp, end = 3.dp).size(14.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                if (stay.rating.isNotBlank())
+                    Text(stay.rating, style = MaterialTheme.typography.labelMedium)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "Hosted by ${stay.host}",
-                    Modifier.weight(1f),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (stay.host.isNotBlank())
+                    Text(
+                        "Hosted by ${stay.host}",
+                        Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                else Spacer(Modifier.weight(1f))
                 Text(stay.nightly.formatted(), style = MaterialTheme.typography.titleMedium)
                 Text(
                     " / night",

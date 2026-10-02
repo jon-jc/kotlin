@@ -1,0 +1,8 @@
+# Copy to roam.properties (ignored by Git), or supply these as environment variables.
+# Only public client configuration belongs here. Server secrets go in server/.env.
+ROAM_API_URL=http://10.0.2.2:8080
+SUPABASE_URL=https://replace-project.supabase.co
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_replace_me
+STRIPE_PUBLISHABLE_KEY=pk_test_replace_me
+# staging uses connected services and permits HTTP only for local development hosts.
+# release requires HTTPS endpoints and a pk_live_ publishable key, and is unsigned.

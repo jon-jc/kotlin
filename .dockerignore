@@ -1,0 +1,8 @@
+# Only the built server distribution belongs in the image build context.
+**
+!server/
+!server/Dockerfile
+!server/build/
+!server/build/install/
+!server/build/install/server/
+!server/build/install/server/**

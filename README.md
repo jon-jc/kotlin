@@ -25,7 +25,7 @@ A native Android travel passport that brings identity, community value, and comm
 * Edit a passport, control its public preview, and export a portable receipt through Android's share sheet.
 * Use the same app in dark mode, at larger font sizes, or on a tablet with a navigation rail and adaptive grid.
 
-No accounts, API keys, network connection, or real payment details are needed. Roam is an independent portfolio demo with fictional stays and a fictional account. Payments, inventory, and membership are simulated; no real booking or identity verification takes place.
+The **demo** runs offline with fictional stays, an account, and simulated payments. The **connected** build uses Supabase email sign-in, a Kotlin service with PostgreSQL, and Stripe PaymentSheet. It requires your service configuration; missing configuration never falls back to simulated success. No services are deployed or merchant accounts configured by this repository.
 
 ## Run it
 
@@ -38,6 +38,17 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 On Windows, use `gradlew.bat`. Android Studio generates `local.properties`; for command-line use, set `ANDROID_HOME` to your SDK directory. Photos and fonts are bundled, so the complete demo works offline. Initial wallet credit is $85; the one-time welcome benefit adds $25.
 
+### Run the connected product
+
+Follow [connected setup](docs/connected-setup.md) and the [service runbook](server/README.md). Copy `roam.properties.example` to the ignored `roam.properties` and supply public client configuration. Server secrets stay in the backend environment.
+
+```sh
+./gradlew :server:installDist :app:assembleStaging
+adb install -r app/build/outputs/apk/staging/app-staging.apk
+```
+
+Staging installs separately from the demo. Production release builds require HTTPS endpoints and a Stripe live publishable key; they remain unsigned until your release pipeline supplies signing. New connected accounts have zero credit. Fictional inventory cannot be sold using live Stripe keys.
+
 ## Engineering decisions you can inspect
 
 | Boundary | Implementation | Why it exists |
@@ -45,6 +56,8 @@ On Windows, use `gradlew.bat`. Android Studio generates `local.properties`; for 
 | `core` | Pure Kotlin, policies, service, store port, receipt contract | Business invariants remain independent of Android |
 | `data` | Room, SQLite WAL, unique request-key index, transaction snapshots | Balance, ledger, and receipt commit or roll back together |
 | `app` | Compose, typed intents, StateFlow, SavedStateHandle, constructor injection | One observable state and recoverable checkout intent |
+| `network` | Cancellable HTTP, Supabase token rotation, session-scoped commerce gateway | Account isolation and reconciliation after uncertain outcomes |
+| `server` | Ktor, PostgreSQL, verified JWTs, durable Stripe state machine | Authoritative prices, inventory and account authorization |
 | `benchmark` | Macrobenchmark startup and frame timing on a minified build | Repeatable measurements with trace evidence |
 
 Money uses checked 64-bit integer cents. Receipt JSON encodes those cents as decimal strings so web clients can preserve values beyond JavaScript's safe integer range. A request key identifies an immutable checkout payload; a conflicting retry fails instead of charging a different request. Cancellation and redemption use the same atomic boundary.
@@ -54,17 +67,20 @@ See [architecture and tradeoffs](docs/architecture.md), [receipt and service con
 ## Verify it
 
 ```sh
-./gradlew spotlessCheck :core:test :data:testDebugUnitTest :app:testDebugUnitTest :app:lintDebug :app:assembleDebug
+docker compose -f server/compose.test.yml -p roam-integration up -d --wait
+./gradlew spotlessCheck :core:test :network:test :server:test :data:testDebugUnitTest :app:testDebugUnitTest :app:lintDebug :app:lintStaging :app:assembleDebug :app:assembleStaging
 ./gradlew :app:connectedDebugAndroidTest
 ./gradlew :benchmark:connectedBenchmarkAndroidTest
 ```
 
-The first command runs 30 JVM tests, including real Room/SQLite integration tests. The second runs five native UI journeys on an attached device. The third measures five cold starts and three scroll iterations on a profileable, minified variant; use a physical device for meaningful performance comparisons. [Recorded results and limitations](docs/verification.md) distinguish automated checks, manual visual inspection, and emulator-only measurements.
+The suites exercise real PostgreSQL and Room/SQLite, signed identity tokens, concurrent inventory allocation, interrupted payments and refunds, session erasure, and native account navigation. The benchmark measures five cold starts and three scroll iterations on a profileable, minified demo variant; use a physical device for meaningful performance comparisons. [Recorded results and limitations](docs/verification.md) distinguish automated checks from provider and device validation still required.
 
 Pull requests run compilation, JVM tests, lint, and API 35 emulator journeys. The performance workflow is manually dispatched because timing on shared CI hardware is noisy. Production release builds are unsigned; the installable portfolio APK uses the optimized benchmark variant signed with a local development key.
 
 ## Production boundary
 
-The local database is authoritative only for this demonstration. A production backend must own account authorization, inventory, prices, payment intents, and fraud controls. The app collects no documents or card credentials, requests no internet permission, and excludes account data from backup and device transfer. Discovery is a bundled three-stay fixture; large datasets would require paging, remote image delivery, and server reconciliation. Copy is English-only. These limits are documented rather than presented as production capabilities.
+The connected service owns account authorization, inventory, immutable quotes, payment intents, and refund reconciliation. Android stores credentials encrypted with Android Keystore in backup-excluded storage; account screens and payment state belong to a login-scoped navigation entry. Stripe collects card details. A client payment callback triggers a server status check and cannot confirm a booking.
+
+This is prepared for service keys and staging validation, not a claim of an operating travel marketplace. Live launch still requires authorized inventory, provider end-to-end tests, signing, support operations, taxes/payout decisions, privacy procedures, and monitored infrastructure. Discovery and history are bounded; full paging, localization, physical-device performance evidence, and a wider accessibility/device matrix remain launch work. See the [service launch requirements](server/README.md#launch-requirements).
 
 Source is [MIT licensed](LICENSE). Photography and fonts retain their [asset licenses](docs/assets.md).

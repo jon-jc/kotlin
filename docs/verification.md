@@ -1,6 +1,6 @@
 # Verification evidence
 
-This report separates correctness checks, visual inspection, and performance measurements. It describes a local portfolio application, not production traffic or a shipped payment system.
+This report preserves the **v1.0.0 offline release** evidence below. Its original counts and measurements do not describe the expanded connected build. Current checks are defined in the Android and commerce-service workflows; connected setup and provider validation are described in [the setup guide](connected-setup.md). No production traffic or live merchant validation is claimed.
 
 ## Automated correctness
 

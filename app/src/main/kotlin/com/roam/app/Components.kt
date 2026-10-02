@@ -21,11 +21,21 @@ import com.roam.core.*
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-fun imageResource(image: String) =
+fun imageResource(image: String): Any =
     when (image) {
         "alpine" -> R.drawable.alpine
         "coast" -> R.drawable.coast
-        else -> R.drawable.kyoto
+        "kyoto" -> R.drawable.kyoto
+        else ->
+            if (
+                runCatching {
+                        val uri = java.net.URI(image)
+                        uri.scheme == "https" && !uri.host.isNullOrBlank() && uri.userInfo == null
+                    }
+                    .getOrDefault(false)
+            )
+                image
+            else R.drawable.ic_roam
     }
 
 fun LocalDate.pretty(): String = format(DateTimeFormatter.ofPattern("MMM d, yyyy"))
@@ -107,12 +117,22 @@ fun PrimaryButton(
 ) {
     Button(
         onClick,
-        modifier.fillMaxWidth().heightIn(min = 56.dp),
+        modifier.fillMaxWidth().heightIn(min = 56.dp).semantics {
+            if (busy) {
+                contentDescription = text
+                stateDescription = "In progress"
+            }
+        },
         enabled = enabled && !busy,
         shape = RoundedCornerShape(16.dp),
         contentPadding = PaddingValues(16.dp),
     ) {
-        if (busy) CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+        if (busy)
+            CircularProgressIndicator(
+                Modifier.size(22.dp),
+                color = MaterialTheme.colorScheme.onSurface,
+                strokeWidth = 2.dp,
+            )
         else {
             Text(text, modifier = Modifier.weight(1f), style = MaterialTheme.typography.labelLarge)
             Icon(Icons.AutoMirrored.Outlined.ArrowForward, null, Modifier.size(19.dp))

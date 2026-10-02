@@ -7,6 +7,7 @@ import com.roam.core.*
 import java.time.LocalDate
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -52,10 +53,15 @@ data class RoamState(
     val snapshot: AccountSnapshot = AccountSnapshot(),
     val loaded: Boolean = false,
     val loadError: String? = null,
+    val isDemo: Boolean = false,
+    val catalog: List<Stay> = emptyList(),
+    val quote: Quote? = null,
+    val quoteLoading: Boolean = false,
+    val quoteError: String? = null,
 ) {
     val stays: List<Stay>
         get() =
-            Catalog.stays.filter { stay ->
+            catalog.filter { stay ->
                 (screen.category == "All stays" || screen.category == stay.category) &&
                     (!screen.savedOnly || stay.id in snapshot.account.saved) &&
                     (screen.query.isBlank() ||
@@ -63,6 +69,21 @@ data class RoamState(
                             .contains(screen.query.trim(), ignoreCase = true))
             }
 }
+
+private data class QuoteInput(
+    val request: BookingRequest,
+    val balance: Money,
+    val recoveredQuote: Quote?,
+    val revision: Int,
+)
+
+private data class QuoteState(
+    val request: BookingRequest? = null,
+    val quote: Quote? = null,
+    val loading: Boolean = false,
+    val error: String? = null,
+    val balance: Money? = null,
+)
 
 sealed interface Intent {
     data class Navigate(val destination: Destination) : Intent
@@ -86,6 +107,8 @@ sealed interface Intent {
     data class Cancel(val key: String) : Intent
 
     data class Receipt(val key: String) : Intent
+
+    data class ResumePayment(val key: String) : Intent
 
     data class Dates(val checkIn: LocalDate) : Intent
 
@@ -114,51 +137,158 @@ sealed interface Intent {
     data object DismissNotice : Intent
 
     data object RetryLoad : Intent
+
+    data object RetryQuote : Intent
+
+    data object RefreshAccount : Intent
 }
 
-class RoamViewModel(private val commerce: CommerceService, private val saved: SavedStateHandle) :
+class RoamViewModel(private val commerce: CommerceGateway, private val saved: SavedStateHandle) :
     ViewModel() {
-    private val initial =
-        ScreenState(
-            destination =
-                runCatching { Destination.valueOf(saved["destination"] ?: "Explore") }
-                    .getOrDefault(Destination.Explore),
-            selectedStay = saved["stay"],
-            checkout = saved["checkout"] ?: false,
-            receipt = saved["receipt"],
-            checkIn =
-                LocalDate.ofEpochDay(
-                    saved["checkIn"] ?: commerce.today().plusDays(14).toEpochDay()
-                ),
-            nights = saved["nights"] ?: 3,
-            guests = saved["guests"] ?: 2,
-            useCredit = saved["credit"] ?: true,
-            requestKey = saved.get<String>("key") ?: UUID.randomUUID().toString(),
-        )
+    private val initial = restoreScreen(saved, commerce.today(), commerce.isDemo)
     private val screen = MutableStateFlow(initial)
     private val snapshot = MutableStateFlow<AccountSnapshot?>(null)
+    private val catalog = MutableStateFlow<List<Stay>?>(null)
+    private val quoted = MutableStateFlow(QuoteState())
+    private val quoteRevision = MutableStateFlow(0)
     private val loadError = MutableStateFlow<String?>(null)
+    private var observation: Job? = null
+    private var refreshing: Job? = null
     val state: StateFlow<RoamState> =
-        combine(screen, snapshot, loadError) { view, account, error ->
-                RoamState(view, account ?: AccountSnapshot(), account != null, error)
+        combine(screen, snapshot, catalog, loadError, quoted) { view, account, stays, error, price
+                ->
+                val request = view.selectedStay?.let { view.request(it) }
+                val matchingQuote =
+                    request != null &&
+                        price.request == request &&
+                        price.balance == account?.account?.balance
+                RoamState(
+                    screen = view,
+                    snapshot = account ?: AccountSnapshot(),
+                    loaded = account != null && stays != null,
+                    loadError = error,
+                    isDemo = commerce.isDemo,
+                    catalog = stays.orEmpty(),
+                    quote = price.quote.takeIf { matchingQuote },
+                    quoteLoading = request != null && (!matchingQuote || price.loading),
+                    quoteError = price.error.takeIf { matchingQuote },
+                )
             }
-            .stateIn(viewModelScope, SharingStarted.Eagerly, RoamState(initial))
+            .stateIn(
+                viewModelScope,
+                SharingStarted.Eagerly,
+                RoamState(initial, isDemo = commerce.isDemo),
+            )
 
     init {
         persist(initial)
         observe()
+        observeQuotes()
     }
 
     private fun observe() {
-        viewModelScope.launch {
-            loadError.value = null
-            try {
-                commerce.snapshots.collect { snapshot.value = it }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: Exception) {
-                loadError.value = "Your passport couldn't be opened. Try again."
+        if (observation?.isActive == true) return
+        loadError.value = null
+        observation =
+            viewModelScope.launch {
+                try {
+                    combine(commerce.snapshots, commerce.catalog) { account, stays ->
+                            account to stays
+                        }
+                        .collect { (account, stays) ->
+                            snapshot.value = account
+                            catalog.value = stays
+                            val current = screen.value
+                            if (
+                                current.selectedStay != null &&
+                                    stays.none { it.id == current.selectedStay }
+                            ) {
+                                val recovered =
+                                    account.bookings.firstOrNull {
+                                        it.request.key == current.requestKey
+                                    }
+                                update {
+                                    it.copy(
+                                        selectedStay = null,
+                                        checkout = false,
+                                        receipt = recovered?.request?.key,
+                                        destination =
+                                            if (recovered != null) Destination.Trips
+                                            else it.destination,
+                                        error =
+                                            if (recovered == null)
+                                                "This stay is no longer available."
+                                            else null,
+                                    )
+                                }
+                            } else if (current.selectedStay != null) {
+                                val stay = stays.first { it.id == current.selectedStay }
+                                if (
+                                    current.guests > stay.maxGuests &&
+                                        account.bookings.none {
+                                            it.request.key == current.requestKey
+                                        }
+                                ) {
+                                    draft { it.copy(guests = stay.maxGuests) }
+                                }
+                            }
+                        }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                    loadError.value = "Your passport couldn't be opened. Try again."
+                }
             }
+    }
+
+    private fun observeQuotes() {
+        viewModelScope.launch {
+            combine(screen, snapshot, catalog, quoteRevision) { view, account, stays, revision ->
+                    val id = view.selectedStay
+                    if (id == null || account == null || stays?.none { it.id == id } != false) null
+                    else {
+                        val request = view.request(id)
+                        QuoteInput(
+                            request,
+                            account.account.balance,
+                            account.bookings.firstOrNull { it.request == request }?.quote,
+                            revision,
+                        )
+                    }
+                }
+                .distinctUntilChanged()
+                .collectLatest { input ->
+                    if (input == null) {
+                        quoted.value = QuoteState()
+                        return@collectLatest
+                    }
+                    input.recoveredQuote?.let {
+                        quoted.value = QuoteState(input.request, it, balance = input.balance)
+                        return@collectLatest
+                    }
+                    quoted.value =
+                        QuoteState(input.request, loading = true, balance = input.balance)
+                    try {
+                        quoted.value =
+                            QuoteState(
+                                input.request,
+                                commerce.quote(input.request),
+                                balance = input.balance,
+                            )
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: CommerceException) {
+                        quoted.value =
+                            QuoteState(input.request, error = e.message, balance = input.balance)
+                    } catch (_: Exception) {
+                        quoted.value =
+                            QuoteState(
+                                input.request,
+                                error = "We couldn't check this price. Try again.",
+                                balance = input.balance,
+                            )
+                    }
+                }
         }
     }
 
@@ -172,6 +302,13 @@ class RoamViewModel(private val commerce: CommerceService, private val saved: Sa
         saved["guests"] = value.guests
         saved["credit"] = value.useCredit
         saved["key"] = value.requestKey
+        saved["query"] = value.query
+        saved["category"] = value.category
+        saved["savedOnly"] = value.savedOnly
+        saved["ledgerFilter"] = value.ledgerFilter
+        saved["profileEditor"] = value.profileEditor
+        saved["privacyEditor"] = value.privacyEditor
+        saved["demoEditor"] = value.demoEditor
     }
 
     private fun update(block: (ScreenState) -> ScreenState) {
@@ -180,8 +317,20 @@ class RoamViewModel(private val commerce: CommerceService, private val saved: Sa
     }
 
     private fun draft(block: (ScreenState) -> ScreenState) {
-        if (!screen.value.busy)
-            update { block(it).copy(requestKey = UUID.randomUUID().toString(), error = null) }
+        if (screen.value.busy) return
+        update { current ->
+            val next = block(current)
+            val changed =
+                next.selectedStay != current.selectedStay ||
+                    next.checkIn != current.checkIn ||
+                    next.nights != current.nights ||
+                    next.guests != current.guests ||
+                    next.useCredit != current.useCredit
+            next.copy(
+                requestKey = if (changed) UUID.randomUUID().toString() else current.requestKey,
+                error = if (changed) null else current.error,
+            )
+        }
     }
 
     private fun operation(block: suspend () -> Unit) {
@@ -204,21 +353,43 @@ class RoamViewModel(private val commerce: CommerceService, private val saved: Sa
 
     fun quote(): Quote? {
         val current = screen.value
-        val account = snapshot.value?.account ?: return null
         val id = current.selectedStay ?: return null
-        snapshot.value
-            ?.bookings
-            ?.firstOrNull { it.request.key == current.requestKey }
-            ?.let {
-                return it.quote
+        return quoted.value
+            .takeIf {
+                it.request == current.request(id) &&
+                    !it.loading &&
+                    it.balance == snapshot.value?.account?.balance
             }
-        return runCatching {
-                BookingPolicy.quote(current.request(id), account.balance, commerce.today())
-            }
-            .getOrNull()
+            ?.quote
     }
 
     fun today() = commerce.today()
+
+    fun refreshAccount() {
+        val current = screen.value
+        if (
+            snapshot.value == null ||
+                current.busy ||
+                current.profileEditor ||
+                current.privacyEditor ||
+                refreshing?.isActive == true
+        )
+            return
+        refreshing =
+            viewModelScope.launch {
+                try {
+                    commerce.refresh()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: CommerceException) {
+                    update { it.copy(error = e.message) }
+                } catch (_: Exception) {
+                    update {
+                        it.copy(error = "We couldn't refresh your account. Please try again.")
+                    }
+                }
+            }
+    }
 
     fun accept(intent: Intent) {
         // Freeze checkout fields and navigation while a transaction is in flight.
@@ -234,16 +405,22 @@ class RoamViewModel(private val commerce: CommerceService, private val saved: Sa
                         error = null,
                     )
                 }
-            is Intent.OpenStay ->
+            is Intent.OpenStay -> {
+                val stay = catalog.value?.firstOrNull { it.id == intent.id }
+                if (stay == null) {
+                    update { it.copy(error = "This stay is no longer available.") }
+                    return
+                }
                 draft {
                     it.copy(
                         selectedStay = intent.id,
                         checkout = false,
                         receipt = null,
-                        guests = minOf(it.guests, Catalog.find(intent.id).maxGuests),
+                        guests = minOf(it.guests, stay.maxGuests),
                         checkIn = maxOf(it.checkIn, today()),
                     )
                 }
+            }
             is Intent.Query -> update { it.copy(query = intent.text.take(100)) }
             is Intent.Category -> update { it.copy(category = intent.name) }
             Intent.SavedOnly -> update { it.copy(savedOnly = !it.savedOnly) }
@@ -251,19 +428,21 @@ class RoamViewModel(private val commerce: CommerceService, private val saved: Sa
             Intent.Back ->
                 update {
                     when {
-                        it.receipt != null ->
-                            it.copy(receipt = null, destination = Destination.Trips)
+                        it.receipt != null -> it.copy(receipt = null, error = null)
                         it.checkout -> it.copy(checkout = false, error = null)
                         else -> it.copy(selectedStay = null, error = null)
                     }
                 }
-            Intent.Checkout -> update { it.copy(checkout = true, error = null) }
+            Intent.Checkout ->
+                if (screen.value.selectedStay != null)
+                    update { it.copy(checkout = true, error = null) }
             Intent.Reserve -> {
                 val current = screen.value
                 val id = current.selectedStay ?: return
+                if (!current.checkout || quote() == null) return
                 operation {
-                    delay(450)
-                    if (current.demoMode == DemoMode.Decline) {
+                    if (commerce.isDemo) delay(450)
+                    if (commerce.isDemo && current.demoMode == DemoMode.Decline) {
                         update {
                             it.copy(
                                 error =
@@ -272,7 +451,7 @@ class RoamViewModel(private val commerce: CommerceService, private val saved: Sa
                         }
                     } else {
                         val booking = commerce.reserve(current.request(id))
-                        if (current.demoMode == DemoMode.LostResponse) {
+                        if (commerce.isDemo && current.demoMode == DemoMode.LostResponse) {
                             update {
                                 it.copy(
                                     demoMode = DemoMode.Normal,
@@ -295,13 +474,62 @@ class RoamViewModel(private val commerce: CommerceService, private val saved: Sa
             }
             is Intent.Cancel ->
                 operation {
-                    commerce.cancel(intent.key)
+                    val booking = commerce.cancel(intent.key)
                     update {
-                        it.copy(notice = "Stay cancelled. Your travel credits have been returned.")
+                        it.copy(
+                            notice =
+                                when {
+                                    booking.requiresSupport ->
+                                        "Your reservation needs a review. Open its receipt for the support reference."
+                                    booking.cancellationPending ->
+                                        "Cancellation is still being processed. Refresh your account to check for an update."
+                                    commerce.isDemo ->
+                                        "Stay cancelled. Your travel credits have been returned."
+                                    else ->
+                                        "Your reservation is cancelled. Payment refunds may take time to appear."
+                                }
+                        )
                     }
                 }
-            is Intent.Receipt -> update { it.copy(receipt = intent.key, error = null) }
-            is Intent.Dates -> draft { it.copy(checkIn = intent.checkIn) }
+            is Intent.Receipt ->
+                update {
+                    it.copy(
+                        receipt = intent.key,
+                        selectedStay = null,
+                        checkout = false,
+                        error = null,
+                    )
+                }
+            is Intent.ResumePayment -> {
+                if (commerce.isDemo) return
+                val pending =
+                    snapshot.value?.bookings?.firstOrNull { it.request.key == intent.key } ?: return
+                if (
+                    !pending.paymentPending ||
+                        pending.requiresSupport ||
+                        pending.cancellationPending ||
+                        pending.cancelled
+                )
+                    return
+                operation {
+                    val booking = commerce.reserve(pending.request)
+                    update {
+                        it.copy(
+                            receipt = booking.request.key,
+                            selectedStay = null,
+                            checkout = false,
+                            error = null,
+                        )
+                    }
+                }
+            }
+            is Intent.Dates -> {
+                if (
+                    intent.checkIn.isBefore(today()) || intent.checkIn.isAfter(today().plusYears(1))
+                ) {
+                    update { it.copy(error = "Choose a check-in date within the next year.") }
+                } else draft { it.copy(checkIn = intent.checkIn) }
+            }
             is Intent.Nights -> draft { it.copy(nights = intent.value.coerceIn(1, 28)) }
             is Intent.Guests ->
                 draft {
@@ -309,17 +537,23 @@ class RoamViewModel(private val commerce: CommerceService, private val saved: Sa
                         guests =
                             intent.value.coerceIn(
                                 1,
-                                Catalog.find(it.selectedStay ?: "kyoto").maxGuests,
+                                catalog.value
+                                    ?.firstOrNull { stay -> stay.id == it.selectedStay }
+                                    ?.maxGuests ?: 1,
                             )
                     )
                 }
             is Intent.Credit -> draft { it.copy(useCredit = intent.use) }
             Intent.Redeem ->
-                operation {
-                    commerce.redeem("welcome")
-                    update { it.copy(notice = "$25 in travel credit is now yours.") }
-                }
-            is Intent.EditProfile -> update { it.copy(profileEditor = intent.show, error = null) }
+                if (commerce.isDemo)
+                    operation {
+                        commerce.redeem("welcome")
+                        update { it.copy(notice = "$25 in travel credit is now yours.") }
+                    }
+            is Intent.EditProfile -> {
+                if (intent.show) refreshing?.cancel()
+                update { it.copy(profileEditor = intent.show, error = null) }
+            }
             is Intent.SaveProfile ->
                 operation {
                     commerce.editProfile(intent.name, intent.hometown, intent.bio)
@@ -330,18 +564,28 @@ class RoamViewModel(private val commerce: CommerceService, private val saved: Sa
                         )
                     }
                 }
-            is Intent.Privacy -> update { it.copy(privacyEditor = intent.show) }
+            is Intent.Privacy -> {
+                if (intent.show) refreshing?.cancel()
+                update { it.copy(privacyEditor = intent.show) }
+            }
             is Intent.SavePrivacy ->
                 operation {
                     commerce.setPrivacy(intent.hometown, intent.activity)
                     update { it.copy(privacyEditor = false, notice = "Privacy preferences saved.") }
                 }
-            is Intent.Demo -> update { it.copy(demoEditor = intent.show) }
+            is Intent.Demo -> if (commerce.isDemo) update { it.copy(demoEditor = intent.show) }
             is Intent.Mode ->
-                update { it.copy(demoMode = intent.mode, demoEditor = false, error = null) }
+                if (commerce.isDemo)
+                    update { it.copy(demoMode = intent.mode, demoEditor = false, error = null) }
             is Intent.LedgerFilter -> update { it.copy(ledgerFilter = intent.name) }
             Intent.DismissNotice -> update { it.copy(notice = null) }
             Intent.RetryLoad -> if (loadError.value != null) observe()
+            Intent.RetryQuote -> {
+                update { it.copy(error = null) }
+                quoted.value = QuoteState()
+                quoteRevision.update { it + 1 }
+            }
+            Intent.RefreshAccount -> refreshAccount()
         }
     }
 
@@ -354,4 +598,49 @@ class RoamViewModel(private val commerce: CommerceService, private val saved: Sa
             guests,
             useCredit,
         )
+}
+
+private inline fun <reified T> SavedStateHandle.read(key: String): T? =
+    runCatching { get<Any?>(key) as? T }.getOrNull()
+
+/** Restored routes can outlive inventory entries or an older version's input constraints. */
+private fun restoreScreen(saved: SavedStateHandle, today: LocalDate, isDemo: Boolean): ScreenState {
+    val stayId = saved.read<String>("stay")?.takeIf { it.isNotBlank() }
+    val savedNights = saved.read<Int>("nights") ?: 3
+    val nights = savedNights.coerceIn(1, 28)
+    val savedGuests = saved.read<Int>("guests") ?: 2
+    val guests = savedGuests.coerceAtLeast(1)
+    val savedDate = saved.read<Long>("checkIn")
+    val parsedDate = savedDate?.let { runCatching { LocalDate.ofEpochDay(it) }.getOrNull() }
+    val checkIn =
+        parsedDate?.takeIf { runCatching { it.plusDays(nights.toLong()) }.isSuccess }
+            ?: today.plusDays(14)
+    val changed =
+        savedNights != nights ||
+            savedGuests != guests ||
+            (savedDate != null && checkIn.toEpochDay() != savedDate)
+    val key = saved.read<String>("key")?.takeIf { it.isNotBlank() && it.length <= 100 }
+    val receipt = saved.read<String>("receipt")?.takeIf { it.isNotBlank() }
+    return ScreenState(
+        destination =
+            runCatching { Destination.valueOf(saved.read<String>("destination") ?: "Explore") }
+                .getOrDefault(Destination.Explore),
+        selectedStay = if (receipt == null) stayId else null,
+        checkout = receipt == null && stayId != null && saved.read<Boolean>("checkout") == true,
+        receipt = receipt,
+        query = saved.read<String>("query")?.take(100) ?: "",
+        category = saved.read<String>("category") ?: "All stays",
+        savedOnly = saved.read<Boolean>("savedOnly") ?: false,
+        checkIn = checkIn,
+        nights = nights,
+        guests = guests,
+        useCredit = saved.read<Boolean>("credit") ?: true,
+        requestKey = if (changed || key == null) UUID.randomUUID().toString() else key,
+        profileEditor = saved.read<Boolean>("profileEditor") ?: false,
+        privacyEditor = saved.read<Boolean>("privacyEditor") ?: false,
+        demoEditor = isDemo && saved.read<Boolean>("demoEditor") == true,
+        ledgerFilter =
+            saved.read<String>("ledgerFilter")?.takeIf { it in setOf("All", "Earned", "Spent") }
+                ?: "All",
+    )
 }

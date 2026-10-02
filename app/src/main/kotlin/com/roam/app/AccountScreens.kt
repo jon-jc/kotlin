@@ -81,7 +81,7 @@ fun WalletScreen(state: RoamState, accept: (Intent) -> Unit) {
                             modifier = Modifier.weight(1f),
                         )
                         Text(
-                            "DEMO ACCOUNT",
+                            if (state.isDemo) "DEMO ACCOUNT" else "TRAVEL WALLET",
                             style = MaterialTheme.typography.labelSmall,
                             color = Forest,
                         )
@@ -89,40 +89,44 @@ fun WalletScreen(state: RoamState, accept: (Intent) -> Unit) {
                 }
             }
         }
-        item {
-            SurfaceCard {
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Icon(
-                        Icons.Outlined.CardGiftcard,
-                        null,
-                        tint = MaterialTheme.colorScheme.primary,
-                    )
-                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
-                        Text(
-                            "A welcome worth keeping",
-                            style = MaterialTheme.typography.titleMedium,
+        if (state.isDemo)
+            item {
+                SurfaceCard {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Icon(
+                            Icons.Outlined.CardGiftcard,
+                            null,
+                            tint = MaterialTheme.colorScheme.primary,
                         )
-                        Text(
-                            "Your community starts with $25 in travel credit.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Column(
+                            Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(5.dp),
+                        ) {
+                            Text(
+                                "A welcome worth keeping",
+                                style = MaterialTheme.typography.titleMedium,
+                            )
+                            Text(
+                                "Your community starts with $25 in travel credit.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
+                    val claimed = "welcome" in state.snapshot.account.redeemed
+                    PrimaryButton(
+                        if (claimed) "Welcome credit claimed" else "Claim $25 welcome credit",
+                        { accept(Intent.Redeem) },
+                        enabled = !claimed,
+                        busy = state.screen.busy,
+                    )
+                    Text(
+                        "One welcome benefit per demo account. Credits have no cash value.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                val claimed = "welcome" in state.snapshot.account.redeemed
-                PrimaryButton(
-                    if (claimed) "Welcome credit claimed" else "Claim $25 welcome credit",
-                    { accept(Intent.Redeem) },
-                    enabled = !claimed,
-                    busy = state.screen.busy,
-                )
-                Text(
-                    "One welcome benefit per demo account. Credits have no cash value.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
             }
-        }
         item { ErrorMessage(state.screen.error) }
         item { SectionHeading("A trail of good things", "ACTIVITY") }
         item {
@@ -153,7 +157,7 @@ fun WalletScreen(state: RoamState, accept: (Intent) -> Unit) {
                     ?.let { key -> { accept(Intent.Receipt(key)) } },
             )
         }
-        if (state.screen.ledgerFilter != "Spent")
+        if (state.isDemo && state.screen.ledgerFilter != "Spent")
             item {
                 LedgerRow(
                     "Your opening travel credit",
@@ -162,7 +166,7 @@ fun WalletScreen(state: RoamState, accept: (Intent) -> Unit) {
                     null,
                 )
             }
-        if (entries.isEmpty() && state.screen.ledgerFilter == "Spent")
+        if (entries.isEmpty() && (state.screen.ledgerFilter == "Spent" || !state.isDemo))
             item {
                 EmptyState(
                     Icons.Outlined.AccountBalanceWallet,
@@ -180,7 +184,10 @@ fun WalletScreen(state: RoamState, accept: (Intent) -> Unit) {
                     Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
                         Text("Yours, wherever you go", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Credits apply automatically at checkout when enabled. Every change is saved to your device with a receipt.",
+                            if (state.isDemo)
+                                "Credits apply automatically at checkout when enabled. Every change is saved to your device with a receipt."
+                            else
+                                "Your wallet activity is saved to your account. Available credit can be applied at checkout.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -265,7 +272,7 @@ fun TripsScreen(state: RoamState, accept: (Intent) -> Unit) {
             }
         }
         items(state.snapshot.bookings, key = { it.id }) { booking ->
-            val stay = Catalog.find(booking.request.stayId)
+            val stay = booking.stay
             Surface(
                 onClick = { accept(Intent.Receipt(booking.request.key)) },
                 shape = RoundedCornerShape(24.dp),
@@ -285,7 +292,14 @@ fun TripsScreen(state: RoamState, accept: (Intent) -> Unit) {
                             shape = RoundedCornerShape(50),
                         ) {
                             Text(
-                                if (booking.cancelled) "CANCELLED" else "CONFIRMED · DEMO",
+                                if (booking.requiresSupport) "NEEDS REVIEW"
+                                else if (booking.cancellationPending) "CANCELLATION PENDING"
+                                else if (booking.paymentPending) "PAYMENT PENDING"
+                                else if (booking.paymentFailed) "PAYMENT FAILED"
+                                else if (booking.cancelled) "CANCELLED"
+                                else if (state.isDemo) "CONFIRMED · DEMO"
+                                else if (booking.simulated) "CONFIRMED · TEST PAYMENT"
+                                else "CONFIRMED",
                                 Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Forest,
@@ -322,10 +336,17 @@ fun TripsScreen(state: RoamState, accept: (Intent) -> Unit) {
 }
 
 @Composable
-fun PassportScreen(state: RoamState, accept: (Intent) -> Unit) {
+fun PassportScreen(state: RoamState, accept: (Intent) -> Unit, onSignOut: (() -> Unit)? = null) {
     val profile = state.snapshot.account.profile
-    val active = state.snapshot.bookings.filterNot { it.cancelled }
-    val countries = active.map { Catalog.find(it.request.stayId).country }.distinct()
+    val active =
+        state.snapshot.bookings.filterNot {
+            it.cancelled ||
+                it.cancellationPending ||
+                it.requiresSupport ||
+                it.paymentPending ||
+                it.paymentFailed
+        }
+    val countries = active.map { it.stay.country }.filter { it.isNotBlank() }.distinct()
     LazyColumn(
         contentPadding = PaddingValues(24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
@@ -376,7 +397,7 @@ fun PassportScreen(state: RoamState, accept: (Intent) -> Unit) {
                             modifier = Modifier.weight(1f),
                         )
                         Text(
-                            "MEMBER / DEMO",
+                            if (state.isDemo) "MEMBER / DEMO" else "ROAM MEMBER",
                             style = MaterialTheme.typography.labelSmall,
                             color = Color(0xFFE9E3C9),
                         )
@@ -418,7 +439,9 @@ fun PassportScreen(state: RoamState, accept: (Intent) -> Unit) {
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 Text(
-                    "This preview follows your privacy preferences. No profile is published from this demo.",
+                    if (state.isDemo)
+                        "This preview follows your privacy preferences. No profile is published from this demo."
+                    else "This preview follows your privacy preferences.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -441,21 +464,42 @@ fun PassportScreen(state: RoamState, accept: (Intent) -> Unit) {
                 ) {
                     accept(Intent.Privacy(true))
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                SettingsRow(
-                    Icons.Outlined.CardGiftcard,
-                    "Community benefits",
-                    "Claim your welcome travel credit",
-                ) {
-                    accept(Intent.Navigate(Destination.Wallet))
+                if (state.isDemo) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingsRow(
+                        Icons.Outlined.CardGiftcard,
+                        "Community benefits",
+                        "Claim your welcome travel credit",
+                    ) {
+                        accept(Intent.Navigate(Destination.Wallet))
+                    }
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingsRow(
+                        Icons.Outlined.Tune,
+                        "Demo controls",
+                        "Try a declined card or recover a lost response",
+                    ) {
+                        accept(Intent.Demo(true))
+                    }
                 }
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                SettingsRow(
-                    Icons.Outlined.Tune,
-                    "Demo controls",
-                    "Try a declined card or recover a lost response",
-                ) {
-                    accept(Intent.Demo(true))
+                if (!state.isDemo) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    SettingsRow(
+                        Icons.Outlined.Refresh,
+                        "Refresh account",
+                        "Check for your latest trips and wallet activity",
+                    ) {
+                        accept(Intent.RefreshAccount)
+                    }
+                    onSignOut?.let {
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                        SettingsRow(
+                            Icons.AutoMirrored.Outlined.Logout,
+                            "Sign out",
+                            "Remove this sign-in from your device",
+                            it,
+                        )
+                    }
                 }
             }
         }
@@ -469,15 +513,17 @@ fun PassportScreen(state: RoamState, accept: (Intent) -> Unit) {
                 Icon(Icons.Outlined.Explore, null, tint = MaterialTheme.colorScheme.primary)
                 Text("Belong a little more.", fontFamily = Serif, fontSize = 22.sp)
                 Text(
-                    "Roam 1.0 · Independent portfolio concept",
+                    if (state.isDemo) "Roam 1.0 · Independent portfolio concept"
+                    else "Roam · Travel and stays",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Text(
-                    "Local demo · No real payments or identity checks",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                if (state.isDemo)
+                    Text(
+                        "Local demo · No real payments or identity checks",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
             }
         }
     }
