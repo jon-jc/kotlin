@@ -37,6 +37,12 @@ No identity documents, card numbers, access tokens, or telemetry leave the devic
 
 ## Verification approach
 
-Pure Kotlin tests cover date and occupancy boundaries, currency arithmetic, fee allocation, and input validation. Robolectric tests use real Room/SQLite transactions for races, unique-key conflicts, rollbacks, one-time redemption, cancellation, persistence, and process-style database reopening. UI and release verification are added in later milestones.
+Pure Kotlin tests cover date and occupancy boundaries, currency arithmetic, fee allocation, and input validation. Robolectric tests use real Room/SQLite transactions for races, unique-key conflicts, rollbacks, one-time redemption, cancellation, persistence, and process-style database reopening.
+
+The ViewModel exposes one immutable state stream, accepts typed intents, and collects the transactional database stream. A `SavedStateHandle` retains checkout details and the exact request key across Android process recreation. Transient operations serialize at the UI boundary and again in the database; cancellation is propagated. After an interrupted response, checkout displays the persisted original quote and retries the same request key.
+
+Seven ViewModel tests cover duplicate taps, decline isolation, lost-response recovery, restored checkout, frozen in-flight input, profile validation, and composed discovery filters. Four native Compose tests exercise complete user journeys against isolated Room databases on API 35. They assert eventual observable state after asynchronous persistence, not timing assumptions.
+
+The layout uses a navigation rail on wide windows and an adaptive discovery grid. Dark colors follow the system. Interactive icons have meaningful accessibility labels; headings, selectable controls, and form fields expose native semantics. Primary controls are at least 48dp. The sample copy is English-only; a production localization pass would extract it to resources and include pseudolocale/RTL testing.
 
 References: [Android architecture recommendations](https://developer.android.com/topic/architecture/recommendations), [Room transactions](https://developer.android.com/reference/androidx/room/Transaction), [Compose state](https://developer.android.com/develop/ui/compose/state).

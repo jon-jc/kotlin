@@ -5,8 +5,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
+import androidx.lifecycle.createSavedStateHandle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import com.roam.core.CommerceService
 import com.roam.data.RoomAccountStore
 import com.roam.data.RoamDatabase
@@ -22,6 +24,14 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-        setContent { MaterialTheme { Text("Roam · Your world, connected.") } }
+        val container = (application as RoamApplication).container
+        setContent {
+            RoamTheme {
+                val model: RoamViewModel = viewModel(factory = viewModelFactory {
+                    initializer { RoamViewModel(container.commerce, createSavedStateHandle()) }
+                })
+                RoamApp(model)
+            }
+        }
     }
 }
