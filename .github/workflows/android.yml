@@ -29,6 +29,15 @@ jobs:
           python -m pip install jsonschema==4.25.1
           python tools/check_contract.py
       - run: ./gradlew spotlessCheck :core:test :network:test :data:testDebugUnitTest :app:testDebugUnitTest :app:lintDebug :app:lintStaging :app:assembleDebug :app:assembleStaging :app:assembleBenchmark :benchmark:assembleBenchmark --stacktrace --max-workers=2
+      - name: Reject unsafe release and client key configuration
+        run: python tools/check_release_guards.py
+      - name: Verify connected release shrinking with synthetic public configuration
+        env:
+          ROAM_API_URL: https://api.release-fixture.invalid
+          SUPABASE_URL: https://auth.release-fixture.invalid
+          SUPABASE_PUBLISHABLE_KEY: sb_publishable_release_fixture
+          STRIPE_PUBLISHABLE_KEY: pk_live_release_fixture
+        run: ./gradlew :app:assembleRelease :app:lintRelease --stacktrace --max-workers=2
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -40,12 +49,6 @@ jobs:
         with:
           name: roam-debug
           path: app/build/outputs/apk/debug/*.apk
-      - name: Unconfigured releases must be rejected
-        run: |
-          if ./gradlew :app:validateReleaseConfiguration; then
-            echo 'Release configuration unexpectedly accepted missing credentials'
-            exit 1
-          fi
   device-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 25

@@ -2,6 +2,7 @@ package com.roam.app
 
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.StateRestorationTester
@@ -12,6 +13,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import com.roam.network.AuthException
+import java.util.Locale
 import java.util.concurrent.ConcurrentLinkedQueue
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.After
@@ -40,7 +42,7 @@ class AuthScreenTest {
                     },
                 )[AuthViewModel::class.java]
         }
-        compose.waitUntil(5_000) { !model.state.value.restoring }
+        awaitAuthState("Saved sign-in restored") { !it.restoring }
     }
 
     @After
@@ -58,7 +60,7 @@ class AuthScreenTest {
         codeField().performTextInput("654321")
         click("Open my passport")
 
-        compose.waitUntil(5_000) { model.state.value.session != null }
+        awaitAuthState("Delivered code accepted") { it.session != null && !it.busy }
         assertEquals(listOf("traveler@example.com"), actions.deliveries.toList())
         assertEquals(listOf("traveler@example.com" to "654321"), actions.attempts.toList())
         assertEquals(SessionIdentity("traveler", "new-login"), model.state.value.session)
@@ -73,6 +75,9 @@ class AuthScreenTest {
         codeField().performTextInput("123")
         click("Open my passport")
 
+        awaitAuthState("Incomplete code rejected") {
+            it.error == "Enter the code from your email." && !it.busy
+        }
         compose
             .onNodeWithText("Enter the code from your email.")
             .performScrollTo()
@@ -89,6 +94,9 @@ class AuthScreenTest {
         codeField().performTextInput("123456")
         click("Open my passport")
 
+        awaitAuthState("Provider rejected the incorrect code") {
+            it.error == "That code is invalid or expired. Request a new code." && !it.busy
+        }
         compose
             .onNodeWithText("That code is invalid or expired. Request a new code.")
             .performScrollTo()
@@ -98,7 +106,7 @@ class AuthScreenTest {
         codeField().performTextReplacement("654321")
         click("Open my passport")
 
-        compose.waitUntil(5_000) { model.state.value.session != null }
+        awaitAuthState("Corrected code accepted") { it.session != null && !it.busy }
         assertEquals(
             listOf("traveler@example.com" to "123456", "traveler@example.com" to "654321"),
             actions.attempts.toList(),
@@ -113,6 +121,7 @@ class AuthScreenTest {
         click("Change email")
         emailField().performTextReplacement("new@example.com")
         click("Send sign-in code")
+        awaitCodeRequest("new@example.com")
 
         compose.onNodeWithText("Enter the sign-in code sent to new@example.com.").assertExists()
         codeField().assertEditableText("")
@@ -155,7 +164,27 @@ class AuthScreenTest {
     private fun requestCode(email: String = "traveler@example.com") {
         emailField().performTextInput(email)
         click("Send sign-in code")
-        codeField().assertExists()
+        awaitCodeRequest(email.trim().lowercase(Locale.ROOT))
+    }
+
+    private fun awaitCodeRequest(email: String) {
+        awaitAuthState("Code delivered to $email") {
+            it.email == email && it.codeRequested && !it.busy && it.error == null
+        }
+        assertEquals(email, actions.deliveries.last())
+        codeField().assertExists().assertIsEnabled()
+    }
+
+    private fun awaitAuthState(description: String, condition: (AuthState) -> Boolean) {
+        try {
+            compose.waitUntil(5_000) { condition(model.state.value) }
+        } catch (error: ComposeTimeoutException) {
+            throw AssertionError(
+                "$description timed out. State=${model.state.value}; " +
+                    "deliveries=${actions.deliveries.toList()}; attempts=${actions.attempts.size}",
+                error,
+            )
+        }
     }
 
     private fun emailField() = compose.onNode(hasSetTextAction() and hasText("Email address"))
@@ -163,7 +192,13 @@ class AuthScreenTest {
     private fun codeField() = compose.onNode(hasSetTextAction() and hasText("Sign-in code"))
 
     private fun click(label: String) {
-        compose.onNodeWithText(label).performScrollTo().performClick()
+        // IME insets can move a touch target independently of the Compose test clock.
+        compose
+            .onNodeWithText(label)
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertIsEnabled()
+            .performSemanticsAction(SemanticsActions.OnClick) { action -> assertTrue(action()) }
     }
 
     private fun SemanticsNodeInteraction.assertEditableText(value: String) =

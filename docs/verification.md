@@ -1,74 +1,58 @@
 # Verification evidence
 
-This report preserves the **v1.0.0 offline release** evidence below. Its original counts and measurements do not describe the expanded connected build. Current checks are defined in the Android and commerce-service workflows; connected setup and provider validation are described in [the setup guide](connected-setup.md). No production traffic or live merchant validation is claimed.
+## Connected foundation — v2.0.0
 
-## Automated correctness
+Verified on October 2, 2026. [PR #4](https://github.com/jon-jc/kotlin/pull/4) passed Android compilation/lint, JVM tests, native device tests, PostgreSQL integration and container smoke checks before merging. Provider configuration and commercial launch remain separate from these controlled tests.
 
-| Suite | Tests | Boundary exercised |
+| Boundary | Passing tests | Evidence |
 | --- | ---: | --- |
-| BookingPolicyTest | 6 | Exact credit allocation; date/occupancy boundaries; leap day; 28-night limit; overflow; profile validation |
-| CommerceIntegrationTest | 10 | Real Room/SQLite transactions; 24 concurrent retries; conflicting keys; overdraft prevention; rollback; duplicate benefit claims; cancellation window; persistent reopen |
-| RoamViewModelTest | 7 | Duplicate taps; decline; committed-but-lost response; saved checkout restoration; in-flight edits; validation; combined filters |
-| ReceiptContractTest | 7 | Golden fixture; private-field exclusion; cancellation; additive evolution; incompatible protocol; malformed money; values above JavaScript's safe integer range |
-| JourneyTest | 5 | Native discovery, wallet/profile, decline/retry, lost-response recovery/cancellation, and actual receipt URI export |
+| Core | 20 | Checked money, date/occupancy policy, historical stay snapshots, receipt privacy and unresolved-state rejection |
+| Network | 27 | Concurrent token rotation, logout races, wrong-account responses, changed quotes, bounded/cancellable HTTP, payment reconciliation |
+| PostgreSQL service | 26 | Signed JWTs, cross-account access, overlapping inventory, stale prices, original credit allocation, lost Stripe responses, refunds, worker fairness and shutdown |
+| Room/SQLite | 18 | Real transactions, concurrent retries, rollback, persisted reopen and v1-to-v2 on-disk migration |
+| Android state | 28 | Draft identity, quote races, pending recovery, profile revision conflicts, auth and payment lifecycle |
+| API 35 device | 25 | Complete journeys, email-code UI, session navigation isolation, payment-state presentation, Keystore ciphertext/tamper/logout tests |
 
-All 30 JVM tests and five native UI tests pass locally. Native tests use isolated in-memory Room databases on API 35 and check eventual UI state after persistence. The receipt journey intercepts Android's share chooser, verifies a narrow read-only content grant, opens the exported JSON, and checks the privacy boundary without sending anything.
+**119 JVM tests and 25 native tests passed locally; no tests were skipped.** The API 35 x86_64 emulator run completed in 25.3 seconds after installation. Its suites use isolated state and controlled authentication; no email was sent and no real card was charged. GitHub also passed all native tests independently.
 
-The JSON Schema validator separately accepts the golden and additive fixtures and rejects five incompatible structures. Kotlin tests enforce arithmetic and temporal invariants beyond JSON Schema. Android lint reports zero errors. Spotless checks Kotlin source and Gradle scripts. CI also builds the optimized app and benchmark APKs so performance tooling cannot silently stop compiling.
+The JSON Schema check accepts golden/additive receipts and rejects five incompatible forms. Debug, staging and optimized benchmark APKs compile. Debug/staging/release lint has zero errors; dependency-update warnings remain visible rather than suppressed. Connected release shrinking also compiles with synthetic public configuration targeting `.invalid` domains; that unsigned verification artifact is not distributed as a working production app.
 
-Reproduce correctness checks:
+Five release configuration checks reject missing settings, a misplaced Stripe private key, a misplaced Supabase private key, a test key in a production release, and a cleartext production endpoint. These checks run in CI; public configuration is distinct from server secrets.
+
+## Actual runtime checks
+
+The Linux service image builds from the installed JVM distribution. It starts as the unprivileged `roam` user with a read-only root filesystem, temporary `/tmp`, all capabilities dropped, and privilege escalation disabled. Live/readiness endpoints return success; explicit development seeding returns three fictional stays; unauthenticated account access returns 401 with `Cache-Control: no-store`. CI repeats this against an isolated PostgreSQL database. The backend test suite requires real PostgreSQL and fails when it is unavailable.
+
+The unconfigured staging APK was installed and inspected on the emulator. It displays the connection-unavailable screen and never falls back to a simulated account. The offline optimized APK was installed and successfully completed startup and scrolling measurements.
+
+## Performance evidence
+
+Two Macrobenchmark methods completed: five cold-start iterations and three discovery-scroll iterations, using `CompilationMode.None()` on the minified demo. API 35 x86_64, software graphics and uncontrolled host load make these diagnostic measurements rather than physical-device release gates.
+
+| v2 diagnostic measurement | Result |
+| --- | ---: |
+| Initial display, median | 536.9 ms |
+| Fully drawn, median | 873.9 ms |
+| Scroll CPU frame duration, P50 | 19.0 ms |
+| Scroll CPU frame duration, P95 | 35.2 ms |
+| Scroll deadline overrun, P99 | 47.4 ms |
+
+[Raw v2 JSON](performance/emulator-api35-v2.json) contains all samples; the release archive contains all eight Perfetto traces. Frame CPU and tail-overrun values are worse than the previously recorded v1 run. This is not evidence of a speedup or a controlled regression estimate: physical-device profiling is required, including the connected flow under network loss and provider latency. An app-specific baseline profile, memory/load tests and a broader device matrix remain work before a commercial release.
+
+The [v1 report](verification-v1.md) preserves the earlier image-decoding investigation, raw before/after measurements, screenshots and trace queries. Those earlier figures are not presented as current connected-product performance.
+
+## Reproduce
 
 ```sh
-python -m pip install jsonschema==4.25.1
-python tools/check_contract.py
-./gradlew spotlessCheck :core:test :data:testDebugUnitTest :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleBenchmark :benchmark:assembleBenchmark
+docker compose -f server/compose.test.yml -p roam-integration up -d --wait
+./gradlew spotlessCheck :core:test :network:test :server:test :data:testDebugUnitTest :app:testDebugUnitTest :app:lintDebug :app:lintStaging :app:assembleDebug :app:assembleStaging :app:assembleBenchmark :benchmark:assembleBenchmark
 ./gradlew :app:connectedDebugAndroidTest
-```
-
-## Device and visual inspection
-
-The app was inspected on an API 35 Pixel-style emulator at 1080 × 2400, in light and dark mode, at 150% font size, and with a 1600 × 2560 tablet window. Native semantics, labelled icon actions, and 48dp controls support accessibility. These checks do not substitute for TalkBack/Switch Access testing or a physical-device and Android-version matrix.
-
-<p>
-  <img src="images/passport-dark.png" width="30%" alt="Passport in dark mode" />
-  <img src="images/large-text.png" width="30%" alt="Discovery with larger system text" />
-  <img src="images/tablet.png" width="35%" alt="Tablet discovery with navigation rail and adaptive cards" />
-</p>
-
-## Performance method
-
-`RoamBenchmark` runs against an R8-minified, resource-shrunk, non-debuggable and profileable app. It measures five cold starts and three scroll iterations. Both use `CompilationMode.None()`; no app-specific baseline profile has been generated. Startup's fully drawn marker includes data and visible photos. Scrolling traverses the discovery feed down and back up, including lazy composition and image loading.
-
-Recorded runs use API 35 x86_64, Windows hardware virtualization, software graphics, four virtual CPU cores, 1080 × 2400 resolution, and normal animation speed. The benchmark's emulator warning was explicitly suppressed to inspect traces. Host load, software graphics, and unlocked clocks make these diagnostic comparisons, not physical-device guarantees or release gates. Raw JSON records the actual device context and individual samples.
-
-Run on a physical device:
-
-```sh
+python tools/check_release_guards.py
 ./gradlew :benchmark:connectedBenchmarkAndroidTest
 ```
 
-To reproduce on an emulator, add `-Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.suppressErrors=EMULATOR`. The manually dispatched performance workflow uses this diagnostic mode and retains JSON and Perfetto artifacts. Open traces with [Perfetto](https://ui.perfetto.dev/).
+Use a physical device for the final command. An emulator diagnostic run requires `-Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.suppressErrors=EMULATOR`. Windows uses `gradlew.bat`. The shared receipt schema check additionally requires `jsonschema==4.25.1` and runs through `python tools/check_contract.py`.
 
-## Trace-led improvement
+## What this does not establish
 
-The original `painterResource` path synchronously decoded a 1200 × 1797 photo on the main thread for 21.9 ms during scrolling. `ImageDecoder#decodeDrawable` occupied 22.4 ms inside lazy-item composition. The replacement uses constraint-aware asynchronous Coil decoding and a shared memory cache. It also waits for image completion before reporting fully drawn, so an empty placeholder does not artificially improve startup results.
-
-| Measurement (ms) | Before | After |
-| --- | ---: | ---: |
-| Cold initial display, median | 486.5 | 515.0 |
-| Cold fully drawn, median | 857.7 | 858.6 |
-| Scroll CPU frame duration, P50 | 11.2 | 18.0 |
-| Scroll CPU frame duration, P95 | 31.1 | 33.2 |
-| Scroll deadline overrun, P99 | 38.7 | 26.0 |
-
-Raw results: [before](performance/emulator-api35-before.json) and [after](performance/emulator-api35-after.json). Both benchmark methods completed successfully. These are two diagnostic runs, not a statistically established speedup: median frame time regressed, fully drawn startup was nearly unchanged, and the worst-tail overrun improved. Do not extrapolate these emulator timings to physical devices.
-
-The second scroll trace shows a narrower, attributable improvement: maximum main-thread lazy composition was 23.53 ms before; the longest main-thread work slice afterward was 11.68 ms, and maximum recomposition was 3.36 ms instead of 23.11 ms. These are trace slices, not overall frame-time percentiles. The after trace still spends significant time in RenderThread drawing and buffer swaps. Asynchronous decoding resolves the identified UI-thread work; physical-device profiling remains necessary to evaluate overall rendering and memory tradeoffs.
-
-The release's trace archive contains the eight traces from each run. The before run used the same benchmark harness before the image-loading change. To reproduce the main-thread investigation, run [main-thread.sql](performance/main-thread.sql) in Perfetto's SQL query view. Compare scroll iteration 001 from each run; all samples remain available rather than selecting only favorable iterations.
-
-## Release boundaries
-
-The installable portfolio APK is the optimized benchmark variant, signed with a local development key. The production release variant remains unsigned; production signing credentials are never committed. Release evidence includes source, the installable APK, and benchmark traces. The demo has no network permission and makes no real reservations, charges, or identity-verification claims.
-
-Before a production launch: implement authoritative backend contracts and authentication, provider-level payment idempotency and reconciliation, paging, localization, a broader device/accessibility matrix, privacy/security review, physical-device profiling, a generated baseline profile, and a monitored staged rollout.
+Real Supabase email delivery, Stripe authentication challenges/charges/refunds, webhook routing, cloud uptime, backup restoration, production signing and store distribution require your configured services and staging verification. Test payment adapters are confined to test source sets. Commercial inventory authorization, taxes/payouts, disputes, support operations, privacy/export/deletion procedures, localization and comprehensive assistive-technology testing are not inferred from passing tests. Follow the [setup guide](connected-setup.md) and [service launch requirements](../server/README.md#launch-requirements).
