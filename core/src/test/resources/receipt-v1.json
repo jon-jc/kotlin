@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "simulated": true,
+  "confirmation": "demo-confirmation",
+  "stayId": "kyoto",
+  "status": "confirmed",
+  "checkIn": "2026-10-09",
+  "checkOut": "2026-10-12",
+  "guests": 2,
+  "total": { "minor": "54432", "currency": "USD" },
+  "creditApplied": { "minor": "8500", "currency": "USD" },
+  "creditReturned": { "minor": "0", "currency": "USD" },
+  "simulatedCardAmount": { "minor": "45932", "currency": "USD" }
+}
