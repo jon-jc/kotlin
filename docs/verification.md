@@ -8,7 +8,7 @@ The comparison milestone adds 54 JVM cases to the connected foundation, bringing
 
 Debug, staging and minified demo builds compile locally; debug/staging lint reports zero errors and 11 warnings each. The optimized demo installs and opens successfully. The comparison form, source status and empty state were inspected in light mode and dark mode at 130% font scale; this does not replace physical-device or assistive-technology acceptance. [Current search screen](images/comparison.png) and [dark large-text form](images/comparison-dark-large.png) preserve the inspected UI.
 
-Nineteen configuration checks run in CI: eighteen reject missing settings, private/test keys, credential-bearing URLs and local/cleartext release endpoints; one accepts an independent HTTPS comparison configuration without commerce credentials. CI also compiles and lints both connected and independent comparison releases using synthetic public endpoints. Those unsigned artifacts are verification builds, not deployed services. [Milestone pull request and check results](https://github.com/jon-jc/kotlin/pull/6).
+Nineteen configuration checks run in CI: eighteen reject missing settings, private/test keys, credential-bearing URLs and local/cleartext release endpoints; one accepts an independent HTTPS comparison configuration without commerce credentials. CI also compiles and lints both connected and independent comparison releases using synthetic public endpoints. Those unsigned artifacts are verification builds, not deployed services. [Milestone pull request and check results](https://github.com/jon-jc/roam-android/pull/6).
 
 The installed comparison service starts in a hardened Linux container as UID 100, without database, identity, payment or provider credentials. Its runtime smoke check verifies readiness, uncached `NOT_CONFIGURED` coverage with zero prices, and absence of account routes. Provider adapters use controlled fixtures; **no live SerpAPI account response has been verified**. Complete the [provider acceptance steps](accommodation-apis.md#verify-after-signing-up) after supplying your own server-side key.
 
@@ -16,7 +16,7 @@ Previous performance numbers below belong to v2.0.0. They are not new measuremen
 
 ## Connected foundation — v2.0.0
 
-Verified on October 2, 2026. [PR #4](https://github.com/jon-jc/kotlin/pull/4) passed Android compilation/lint, JVM tests, native device tests, PostgreSQL integration and container smoke checks before merging. Provider configuration and commercial launch remain separate from these controlled tests.
+Verified on October 2, 2026. [PR #4](https://github.com/jon-jc/roam-android/pull/4) passed Android compilation/lint, JVM tests, native device tests, PostgreSQL integration and container smoke checks before merging. Provider configuration and commercial launch remain separate from these controlled tests.
 
 | Boundary | Passing tests | Evidence |
 | --- | ---: | --- |
