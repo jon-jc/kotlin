@@ -36,7 +36,7 @@ Navigation entries isolate account ViewModels and saved state. Signing out or sw
 
 Amounts use checked 64-bit integer USD cents. Wire amounts are decimal strings so other platforms do not lose precision. Quotes preserve subtotal, service fee, total, original credit allocation and card due. Dates are civil dates, with cancellation evaluated in the property's IANA time zone.
 
-The demo serializes balance, booking and ledger changes in one Room transaction. Connected checkout accepts a server-created five-minute quote and reserves each occupied night in `[checkIn, checkOut)` under PostgreSQL uniqueness constraints. Quotes alone do not hold inventory. A changed credit balance rejects the accepted quote instead of increasing the card charge. Per-account row locks serialize credit allocation, while night constraints prevent two accounts booking overlapping inventory.
+The demo serializes balance, booking and ledger changes in one Room transaction. Connected checkout accepts a server-created five-minute quote and reserves each occupied night in `[checkIn, checkOut)` under PostgreSQL uniqueness constraints. Quotes alone do not hold inventory. If the remaining balance cannot cover the accepted credit allocation, the server rejects the quote with `QUOTE_STALE`; it never increases the accepted card charge. An increased balance leaves the accepted amounts unchanged. Per-account row locks serialize credit allocation, while night constraints prevent two accounts booking overlapping inventory.
 
 Stripe calls occur outside database transactions, using stable keys derived from the server reservation. The reservation is durable before those calls. A lost response remains an uncertain operation that can be looked up and reconciled. The phone cannot mark a payment confirmed; even a successful SDK callback only starts a server status check. Refund completion is likewise verified before releasing inventory or credit.
 
@@ -52,7 +52,7 @@ The image-loading design followed a trace finding of synchronous drawable decodi
 
 Native semantics label controls, progress, headings and selection; primary touch targets are at least 48dp. Dark mode and adaptive layouts are implemented. English-only copy, comprehensive TalkBack/Switch Access verification, and a wider device/version matrix remain launch work.
 
-PostgreSQL constraints and leased work permit multiple service instances, but no production throughput is claimed. Catalog and history responses are bounded; account history currently returns the newest 200 rows. Cursor paging, indexed discovery and richer history must be added before crossing those limits. Taxes, payouts, disputes, channel-manager inventory, commercial policies and support operations depend on the actual business.
+PostgreSQL constraints and leased work permit multiple service instances, but no production throughput is claimed. The commerce catalog currently returns all active stays without pagination. Account history returns at most the newest 200 reservations and 200 ledger entries. Comparison returns at most 50 properties per category and 60 offers per property, also without pagination. Cursor paging, indexed discovery and richer history remain necessary for larger catalogs and histories. Taxes, payouts, disputes, channel-manager inventory, commercial policies and support operations depend on the actual business.
 
 ## Accommodation comparison
 

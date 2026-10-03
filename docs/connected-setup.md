@@ -8,7 +8,7 @@ Roam uses a native Kotlin/Compose client, a portable Kotlin/Ktor service, Supaba
 2. Create a Stripe test environment. Put its `sk_test_...` key and endpoint-specific `whsec_...` webhook secret in the server environment. Use the matching `pk_test_...` publishable key in Android. Register the events and API version documented in the [service runbook](../server/README.md).
 3. Give the service a dedicated PostgreSQL credential. The private `roam` schema must not be exposed through Supabase's public Data API. In production, verify the database certificate with `sslmode=verify-full` and the appropriate CA.
 4. Copy `server/.env.example` to `server/.env`, supply the values, and follow the service runbook. The example is production-oriented; local development explicitly sets `ROAM_ENV=development`. Database and Stripe secret values belong only on the service host.
-5. Copy `roam.properties.example` to `roam.properties` at the repository root. Fill `ROAM_API_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and `STRIPE_PUBLISHABLE_KEY`. Environment variables with these names override the file. These four values are public client configuration embedded in the APK. Supabase `sb_secret_...`, service-role JWTs, and Stripe `sk_...` keys are never accepted as client configuration.
+5. Copy `roam.properties.example` to `roam.properties` at the repository root. Fill `ROAM_API_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, and `STRIPE_PUBLISHABLE_KEY`. Set the optional `ROAM_COMPARISON_API_URL` for a separate search service, or remove that property to use `ROAM_API_URL` for both. The copied example includes an emulator comparison address: replace it with your hosted HTTPS address or remove it when deploying hosted services. Environment variables with these names override the file. All five settings are public client configuration embedded in the APK. Supabase `sb_secret_...`, service-role JWTs, and Stripe `sk_...` keys are never accepted as client configuration.
 
 The connected client requires Supabase's current `sb_publishable_...` key. Do not substitute an older anonymous JWT or a privileged server key. Both local files are ignored by Git; the committed examples contain placeholders only.
 
@@ -16,7 +16,7 @@ The connected client requires Supabase's current `sb_publishable_...` key. Do no
 
 With the database configured, run `./gradlew :server:installDist`. Use `docker compose -f server/compose.yml up --build -d` to start the service, then check `/health/ready`. The sample Compose deployment binds to host loopback. A local Android emulator reaches the host through `http://10.0.2.2:8080`. Set that as `ROAM_API_URL` in the staging configuration. Use HTTPS for hosted services; the staging network policy permits cleartext only for the explicit local development hosts.
 
-Build with `./gradlew :app:assembleStaging` and install `app/build/outputs/apk/staging/app-staging.apk`. Windows uses `gradlew.bat`. The app installs as `com.roam.app.staging`, leaving the offline demo's data separate. Missing or invalid settings show a setup-unavailable screen.
+Build with `./gradlew :app:assembleStaging` and install `app/build/outputs/apk/staging/app-staging.apk`. Windows uses `gradlew.bat`. The app installs as `com.roam.app.staging`, leaving the offline demo's data separate. Staging opens Compare before sign-in; choose **Your passport** to reach account and payment features. Missing or invalid commerce settings show a setup-unavailable screen there. Comparison can use its own configured service independently.
 
 Seed fictional inventory only in development with `./gradlew :server:run --args="--seed-demo"` after setting the database environment variables. This requires `ROAM_ENV=development`; live Stripe mode rejects these sample stays. Use Stripe test cards in staging. New users start with no wallet credit and no invented identity verification or membership benefits.
 
@@ -44,10 +44,11 @@ Automated tests use controlled provider adapters and signed test JWTs; they do n
 | --- | --- | --- |
 | `debug` | Local demo | Development and native demo tests |
 | `benchmark` | Local demo | Optimized installable showcase and measurements |
-| `staging` | Connected | Your test services; separate application ID |
-| `release` | Connected | HTTPS and live publishable key validation; unsigned by default |
+| `staging` | Comparison and connected commerce | Opens Compare before sign-in; your test services; separate application ID |
+| `release` | Comparison and connected commerce | HTTPS and live publishable key validation; unsigned by default |
+| `comparison` | Comparison only | Public HTTPS search endpoint; no Supabase or Stripe configuration; unsigned; installs as `com.roam.app.compare` |
 
-Run `:app:validateReleaseConfiguration` to check the public production settings. Release builds depend on this check. Add signing in your protected CI environment; no signing credential is included. Back up signing keys and preserve the application ID when distributing updates.
+Run `:app:validateReleaseConfiguration` to check the public production settings. Release builds depend on this check, including HTTPS validation for a configured comparison endpoint. The independent comparison variant uses `:app:validateComparisonReleaseConfiguration`; see [comparison setup](accommodation-apis.md#configure-android). Add signing in your protected CI environment; no signing credential is included. Back up signing keys and preserve the application ID when distributing updates.
 
 The [service runbook](../server/README.md) covers provider keys, containers, database migration, deployment limits, and operational recovery. Finish its launch requirements before accepting real money. Add an appropriate privacy policy, support channel, account deletion/export workflow, and store disclosures for the actual business and data practices.
 
