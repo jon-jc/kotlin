@@ -22,6 +22,7 @@ fun RoamApp(
     viewModel: RoamViewModel,
     onSignOut: (() -> Unit)? = null,
     sessionError: String? = null,
+    onCompare: (() -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     ReportDrawnWhen { state.loaded || state.loadError != null }
@@ -145,7 +146,7 @@ fun RoamApp(
                             screen.selectedStay != null ->
                                 StayDetail(state, viewModel.today(), accept)
                             screen.destination == Destination.Explore ->
-                                ExploreScreen(state, accept)
+                                ExploreScreen(state, accept, onCompare)
                             screen.destination == Destination.Trips -> TripsScreen(state, accept)
                             screen.destination == Destination.Wallet -> WalletScreen(state, accept)
                             else -> PassportScreen(state, accept, onSignOut)

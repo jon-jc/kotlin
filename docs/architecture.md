@@ -54,6 +54,14 @@ Native semantics label controls, progress, headings and selection; primary touch
 
 PostgreSQL constraints and leased work permit multiple service instances, but no production throughput is claimed. Catalog and history responses are bounded; account history currently returns the newest 200 rows. Cursor paging, indexed discovery and richer history must be added before crossing those limits. Taxes, payouts, disputes, channel-manager inventory, commercial policies and support operations depend on the actual business.
 
+## Accommodation comparison
+
+Comparison is a separate public boundary from authenticated commerce. `ComparisonGateway` carries the submitted destination, dates, occupancy, market and currency unchanged through search and property details. Exact decimal amounts have explicit currencies and optional total/nightly fields. Only reported tax-inclusive full-stay totals enter total-price ordering; missing fees or totals are visible and never synthesized from a nightly amount. Provider observations never become Roam quotes, wallet transactions or bookable inventory.
+
+An editable `ComparisonDraft` permits blank and partial input; the immutable wire query validates on submission. Criteria survive recreation while offers and outbound links remain memory-only. Each edit cancels requests and advances generations, preventing older responses from restoring the wrong trip or property. Handoff checks freshness again at the moment of opening the browser. External URLs are restricted to public HTTPS host syntax without credentials or provider API secrets.
+
+The server concurrently requests hotel and rental sources under a shared concurrency bound and per-process budget. A source failure does not discard successful coverage. SerpAPI responses must echo the requested context before numeric amounts receive currency labels. Provider requests do not follow redirects and have complete-body time and size bounds. There are no automatic paid retries or persisted search results. The standalone runtime omits database, identity and payment initialization; public deployment still requires shared ingress limits and an account-wide provider budget. [Provider setup and current limits](accommodation-apis.md).
+
 ## Verification
 
 Unit and integration suites exercise arithmetic, snapshot history, real SQLite migrations, signed tokens, real PostgreSQL contention, provider failures, HTTP cancellation and account isolation. Native tests exercise complete journeys, payment-state presentation, session navigation and Keystore storage. Provider adapters in tests are controlled substitutes, not evidence that your deployed Stripe or email configuration works. Follow the [connected setup](connected-setup.md) for those staging checks.

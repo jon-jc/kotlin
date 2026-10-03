@@ -13,7 +13,11 @@ import java.util.concurrent.TimeUnit
 
 /** A deadline includes the complete body, which HttpRequest.timeout alone does not guarantee. */
 internal class BoundedHttp {
-    private val client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
+    private val client =
+        HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(5))
+            .followRedirects(HttpClient.Redirect.NEVER)
+            .build()
 
     fun send(
         request: HttpRequest,

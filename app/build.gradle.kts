@@ -1,4 +1,5 @@
 import java.net.URI
+import java.util.Locale
 import java.util.Properties
 
 plugins {
@@ -16,6 +17,22 @@ val publicConfiguration =
         .associateWith {
             providers.environmentVariable(it).orNull ?: localConfiguration.getProperty(it, "")
         }
+
+val comparisonApiUrl =
+    providers.environmentVariable("ROAM_COMPARISON_API_URL").orNull
+        ?: localConfiguration.getProperty(
+            "ROAM_COMPARISON_API_URL",
+            publicConfiguration.getValue("ROAM_API_URL"),
+        )
+
+comparisonApiUrl
+    .takeIf { it.isNotBlank() }
+    ?.let {
+        val uri = URI(it)
+        check(uri.rawUserInfo == null && uri.rawQuery == null && uri.rawFragment == null) {
+            "ROAM_COMPARISON_API_URL must not contain credentials, queries, or fragments."
+        }
+    }
 
 // Reject misplaced server credentials before any variant can embed them in an APK.
 publicConfiguration
@@ -57,22 +74,38 @@ fun quoted(value: String) =
             .replace("\r", "\\r") +
         "\""
 
+// Static host validation only: release configuration must name a DNS service, never a local
+// machine or literal address. No DNS lookups (or secret-bearing requests) run during a build.
+fun publicReleaseEndpoint(value: String): Boolean {
+    val uri = runCatching { URI(value) }.getOrNull() ?: return false
+    if (
+        !uri.scheme.equals("https", ignoreCase = true) ||
+            uri.rawUserInfo != null ||
+            uri.rawQuery != null ||
+            uri.rawFragment != null
+    )
+        return false
+    val host = uri.host?.lowercase(Locale.ROOT) ?: return false
+    if (host.length > 253 || host.endsWith('.') || ':' in host) return false
+    val labels = host.split('.')
+    if (
+        labels.size < 2 || labels.any { !it.matches(Regex("[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?")) }
+    )
+        return false
+    if (!labels.last().matches(Regex("[a-z]{2,63}|xn--[a-z0-9-]{2,59}"))) return false
+    val localSuffixes =
+        setOf("localhost", "local", "internal", "home", "lan", "localdomain", "home.arpa", "onion")
+    return localSuffixes.none { host == it || host.endsWith(".$it") }
+}
+
 val validateReleaseConfiguration by
     tasks.registering {
         group = "verification"
         description = "Rejects unconfigured production builds and test payment keys."
         doLast {
+            if (comparisonApiUrl.isNotBlank()) validateComparisonUrl()
             for (name in listOf("ROAM_API_URL", "SUPABASE_URL")) {
-                val uri = runCatching { URI(publicConfiguration.getValue(name)) }.getOrNull()
-                check(
-                    uri != null &&
-                        uri.scheme == "https" &&
-                        !uri.host.isNullOrBlank() &&
-                        uri.userInfo == null &&
-                        uri.rawQuery == null &&
-                        uri.rawFragment == null &&
-                        uri.host !in setOf("localhost", "127.0.0.1", "10.0.2.2")
-                ) {
+                check(publicReleaseEndpoint(publicConfiguration.getValue(name))) {
                     "$name must be a public HTTPS URL for release."
                 }
             }
@@ -89,6 +122,20 @@ val validateReleaseConfiguration by
         }
     }
 
+fun validateComparisonUrl() {
+    check(publicReleaseEndpoint(comparisonApiUrl)) {
+        "ROAM_COMPARISON_API_URL must be a public HTTPS URL for comparison release."
+    }
+}
+
+val validateComparisonReleaseConfiguration by
+    tasks.registering {
+        group = "verification"
+        description =
+            "Requires a public HTTPS search service without requiring commerce credentials."
+        doLast { validateComparisonUrl() }
+    }
+
 android {
     namespace = "com.roam.app"
     compileSdk = 36
@@ -96,9 +143,11 @@ android {
         applicationId = "com.roam.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "2.0.0"
+        versionCode = 3
+        versionName = "2.1.0"
         buildConfigField("boolean", "ROAM_CONNECTED", "false")
+        buildConfigField("boolean", "ROAM_COMPARISON_ONLY", "false")
+        buildConfigField("String", "ROAM_COMPARISON_API_URL", quoted(comparisonApiUrl))
         publicConfiguration.forEach { (name, value) ->
             buildConfigField("String", name, quoted(value))
         }
@@ -129,6 +178,12 @@ android {
             buildConfigField("boolean", "ROAM_CONNECTED", "true")
             matchingFallbacks += listOf("debug")
         }
+        create("comparison") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".compare"
+            buildConfigField("boolean", "ROAM_COMPARISON_ONLY", "true")
+            matchingFallbacks += listOf("release")
+        }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -150,6 +205,10 @@ kotlin { jvmToolchain(17) }
 tasks
     .matching { it.name == "preReleaseBuild" }
     .configureEach { dependsOn(validateReleaseConfiguration) }
+
+tasks
+    .matching { it.name == "preComparisonBuild" }
+    .configureEach { dependsOn(validateComparisonReleaseConfiguration) }
 
 dependencies {
     implementation(project(":core"))

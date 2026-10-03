@@ -28,6 +28,7 @@ fun AppSessionHost(
     auth: SupabaseAuth,
     configuration: ConnectedConfiguration,
     authModel: AuthViewModel,
+    onCompare: (() -> Unit)? = null,
 ) {
     val authState by authModel.state.collectAsStateWithLifecycle()
     SessionNavigation(authState, login = { AuthScreen(authState, authModel) }) { entry, identity ->
@@ -76,7 +77,12 @@ fun AppSessionHost(
             onDispose { payment.detach(launch) }
         }
         LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { model.refreshAccount() }
-        RoamApp(model, onSignOut = authModel::signOut, sessionError = authState.error)
+        RoamApp(
+            model,
+            onSignOut = authModel::signOut,
+            sessionError = authState.error,
+            onCompare = onCompare,
+        )
     }
 }
 

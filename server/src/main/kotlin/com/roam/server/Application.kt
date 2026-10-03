@@ -1,6 +1,8 @@
 package com.roam.server
 
 import com.roam.core.api.*
+import com.roam.server.comparison.ComparisonConfig
+import com.roam.server.comparison.ComparisonService
 import io.ktor.http.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
@@ -22,6 +24,15 @@ import kotlinx.serialization.SerializationException
 private val requestIdKey = AttributeKey<String>("request-id")
 
 fun main(args: Array<String>) {
+    if (args.contentEquals(arrayOf("--comparison-only"))) {
+        val config = ComparisonConfig.load()
+        val comparison = ComparisonService.create(config)
+        embeddedServer(Netty, host = "0.0.0.0", port = config.port) {
+                comparisonModule(comparison, config.ingressRateLimited)
+            }
+            .start(wait = true)
+        return
+    }
     if (args.contentEquals(arrayOf("--seed-demo"))) {
         require(System.getenv("ROAM_ENV") == "development") {
             "Demo seeding requires ROAM_ENV=development"
@@ -39,6 +50,7 @@ fun main(args: Array<String>) {
     val database = Database(config.databaseUrl, config.databaseUser, config.databasePassword)
     val commerce = Commerce(database, StripePayments(config.stripeSecret), config.livePayments)
     val verifier = TokenVerifier(config.issuer, config.audience, RemoteKeys(config.issuer))
+    val comparison = ComparisonService.create(ComparisonConfig.load())
     embeddedServer(Netty, host = "0.0.0.0", port = config.port) {
             module(
                 database,
@@ -46,6 +58,7 @@ fun main(args: Array<String>) {
                 verifier,
                 StripeWebhook(config.webhookSecret, config.livePayments),
                 ingressRateLimited = config.ingressRateLimited,
+                comparison = comparison,
             )
             monitor.subscribe(ApplicationStopped) { database.close() }
         }
@@ -59,58 +72,9 @@ fun Application.module(
     webhook: StripeWebhook,
     workerEnabled: Boolean = true,
     ingressRateLimited: Boolean = false,
+    comparison: ComparisonService = ComparisonService.unconfigured(),
 ) {
-    install(ContentNegotiation) { json(wireJson) }
-    install(StatusPages) {
-        exception<ApiFailure> { call, failure ->
-            call.respond(
-                HttpStatusCode.fromValue(failure.status),
-                ApiError(failure.code, failure.message, call.id()),
-            )
-        }
-        exception<SerializationException> { call, _ ->
-            call.respond(
-                HttpStatusCode.BadRequest,
-                ApiError("INVALID_JSON", "The request could not be read.", call.id()),
-            )
-        }
-        exception<Throwable> { call, failure ->
-            if (failure is CancellationException) throw failure
-            // Never log credentials, request/response bodies, provider responses, or exception
-            // messages.
-            call.application.log.warn(
-                "Request {} failed ({})",
-                call.id(),
-                failure.javaClass.simpleName,
-            )
-            call.respond(
-                HttpStatusCode.InternalServerError,
-                ApiError(
-                    "INTERNAL_ERROR",
-                    "We could not complete this request. Retry safely.",
-                    call.id(),
-                ),
-            )
-        }
-    }
-    val limiter = RequestLimiter()
-    intercept(ApplicationCallPipeline.Call) {
-        call.attributes.put(requestIdKey, UUID.randomUUID().toString())
-        call.response.header("X-Request-Id", call.id())
-        call.response.header(HttpHeaders.CacheControl, "no-store")
-        call.response.header("X-Content-Type-Options", "nosniff")
-        if (call.request.uri.length > 2048)
-            throw ApiFailure(414, "REQUEST_TOO_LARGE", "The request is too large.")
-        if (
-            call.request.headers[HttpHeaders.ContentLength]?.toLongOrNull()?.let { it > 65536 } ==
-                true
-        )
-            throw ApiFailure(413, "REQUEST_TOO_LARGE", "The request is too large.")
-        // Forwarding headers are not trusted. Configure additional distributed limits at the
-        // ingress.
-        if (!ingressRateLimited && call.request.path() != "/v1/webhooks/stripe")
-            limiter.check("ip:${call.request.local.remoteHost}", 240)
-    }
+    val limiter = apiBoundary(ingressRateLimited)
 
     suspend fun ApplicationCall.user(): String =
         withContext(Dispatchers.IO) {
@@ -123,6 +87,7 @@ fun Application.module(
         }
 
     routing {
+        comparisonRoutes(comparison, ingressRateLimited)
         get("/health/live") { call.respond(ApiOk()) }
         get("/health/ready") {
             if (!withContext(Dispatchers.IO) { database.healthy() })
@@ -213,15 +178,71 @@ fun Application.module(
     }
 }
 
-private fun ApplicationCall.id() = attributes.getOrNull(requestIdKey) ?: "unavailable"
+internal fun Application.apiBoundary(ingressRateLimited: Boolean): RequestLimiter {
+    install(ContentNegotiation) { json(wireJson) }
+    install(StatusPages) {
+        exception<ApiFailure> { call, failure ->
+            call.respond(
+                HttpStatusCode.fromValue(failure.status),
+                ApiError(failure.code, failure.message, call.id()),
+            )
+        }
+        exception<SerializationException> { call, _ ->
+            call.respond(
+                HttpStatusCode.BadRequest,
+                ApiError("INVALID_JSON", "The request could not be read.", call.id()),
+            )
+        }
+        exception<Throwable> { call, failure ->
+            if (failure is CancellationException) throw failure
+            // Never log credentials, request/response bodies, provider responses, or exception
+            // messages.
+            call.application.log.warn(
+                "Request {} failed ({})",
+                call.id(),
+                failure.javaClass.simpleName,
+            )
+            call.respond(
+                HttpStatusCode.InternalServerError,
+                ApiError(
+                    "INTERNAL_ERROR",
+                    "We could not complete this request. Retry safely.",
+                    call.id(),
+                ),
+            )
+        }
+    }
+    val limiter = RequestLimiter()
+    intercept(ApplicationCallPipeline.Call) {
+        call.attributes.put(requestIdKey, UUID.randomUUID().toString())
+        call.response.header("X-Request-Id", call.id())
+        call.response.header(HttpHeaders.CacheControl, "no-store")
+        call.response.header("X-Content-Type-Options", "nosniff")
+        if (call.request.uri.length > 2048)
+            throw ApiFailure(414, "REQUEST_TOO_LARGE", "The request is too large.")
+        if (
+            call.request.headers[HttpHeaders.ContentLength]?.toLongOrNull()?.let { it > 65536 } ==
+                true
+        )
+            throw ApiFailure(413, "REQUEST_TOO_LARGE", "The request is too large.")
+        // Forwarding headers are not trusted. Configure additional distributed limits at the
+        // ingress.
+        if (!ingressRateLimited && call.request.path() != "/v1/webhooks/stripe")
+            limiter.check("ip:${call.request.local.remoteHost}", 240)
+    }
 
-private suspend inline fun <reified T> ApplicationCall.body(): T {
-    if (request.contentType().withoutParameters() != ContentType.Application.Json)
-        throw ApiFailure(415, "CONTENT_TYPE", "Use application/json for this request.")
-    return wireJson.decodeFromString(boundedBody().toString(Charsets.UTF_8))
+    return limiter
 }
 
-private suspend fun ApplicationCall.boundedBody(): ByteArray {
+private fun ApplicationCall.id() = attributes.getOrNull(requestIdKey) ?: "unavailable"
+
+internal suspend inline fun <reified T> ApplicationCall.body(maximum: Int = 65536): T {
+    if (request.contentType().withoutParameters() != ContentType.Application.Json)
+        throw ApiFailure(415, "CONTENT_TYPE", "Use application/json for this request.")
+    return wireJson.decodeFromString(boundedBody(maximum).toString(Charsets.UTF_8))
+}
+
+internal suspend fun ApplicationCall.boundedBody(maximum: Int = 65536): ByteArray {
     val channel = receiveChannel()
     val result = ByteArrayOutputStream()
     val buffer = ByteArray(4096)
@@ -229,7 +250,7 @@ private suspend fun ApplicationCall.boundedBody(): ByteArray {
         while (true) {
             val size = channel.readAvailable(buffer, 0, buffer.size)
             if (size == -1) break
-            if (result.size() + size > 65536)
+            if (result.size() + size > maximum)
                 throw ApiFailure(413, "REQUEST_TOO_LARGE", "The request is too large.")
             result.write(buffer, 0, size)
         }
@@ -238,7 +259,7 @@ private suspend fun ApplicationCall.boundedBody(): ByteArray {
 }
 
 /** Bounded per-process defense; the deployment ingress supplies global limits across replicas. */
-private class RequestLimiter {
+internal class RequestLimiter {
     private data class Window(val minute: Long, var count: Int)
 
     private val windows = LinkedHashMap<String, Window>()

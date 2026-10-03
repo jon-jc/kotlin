@@ -1,5 +1,19 @@
 # Verification evidence
 
+## Accommodation comparison — v2.1.0
+
+The comparison milestone adds 54 JVM cases to the connected foundation, bringing the passing total to **173**: core 28, network 38, PostgreSQL service 48, Room/SQLite 18, and Android state 41. No cases are skipped. Coverage includes exact decimal/JPY prices, incomplete fees and totals, strict trip/currency echo matching, exact-name property responses, unsafe links, stale handoffs, out-of-order responses, cancellation, partial provider failures, request budgets and standalone routing.
+
+**33 native API 35 tests pass locally and in GitHub**, including eight new comparison cases. The local run completed in 41.74 seconds, with no skips or failures. This gives **206 distinct JVM/native correctness tests**. Comparison coverage includes the real Explore entry, form controls, reported full-stay prices, missing totals, partial failures, explicit Airbnb separation, expired provider links and automatic scrolling to new results. These tests use controlled responses and never contact a pricing provider.
+
+Debug, staging and minified demo builds compile locally; debug/staging lint reports zero errors and 11 warnings each. The optimized demo installs and opens successfully. The comparison form, source status and empty state were inspected in light mode and dark mode at 130% font scale; this does not replace physical-device or assistive-technology acceptance. [Current search screen](images/comparison.png) and [dark large-text form](images/comparison-dark-large.png) preserve the inspected UI.
+
+Nineteen configuration checks run in CI: eighteen reject missing settings, private/test keys, credential-bearing URLs and local/cleartext release endpoints; one accepts an independent HTTPS comparison configuration without commerce credentials. CI also compiles and lints both connected and independent comparison releases using synthetic public endpoints. Those unsigned artifacts are verification builds, not deployed services. [Milestone pull request and check results](https://github.com/jon-jc/kotlin/pull/6).
+
+The installed comparison service starts in a hardened Linux container as UID 100, without database, identity, payment or provider credentials. Its runtime smoke check verifies readiness, uncached `NOT_CONFIGURED` coverage with zero prices, and absence of account routes. Provider adapters use controlled fixtures; **no live SerpAPI account response has been verified**. Complete the [provider acceptance steps](accommodation-apis.md#verify-after-signing-up) after supplying your own server-side key.
+
+Previous performance numbers below belong to v2.0.0. They are not new measurements of the comparison feature. Physical-device profiling, actual provider acceptance and operational deployment remain launch requirements.
+
 ## Connected foundation — v2.0.0
 
 Verified on October 2, 2026. [PR #4](https://github.com/jon-jc/kotlin/pull/4) passed Android compilation/lint, JVM tests, native device tests, PostgreSQL integration and container smoke checks before merging. Provider configuration and commercial launch remain separate from these controlled tests.
